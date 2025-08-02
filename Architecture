@@ -1,0 +1,25 @@
+lib/
+├── main.dart
+├── pages/
+│   ├── home_page.dart
+│   ├── login_page.dart
+│   ├── admin/
+│   │   ├── admin_dashboard.dart
+│   │   ├── add_student.dart
+│   │   ├── student_list.dart
+│   │   └── gate_pass_requests.dart
+│   ├── student/
+│   │   ├── student_dashboard.dart
+│   │   ├── request_pass.dart
+│   │   └── view_my_pass.dart
+│   ├── security/
+│   │   └── security_dashboard.dart
+│   │   └── qr_scanner.dart
+│   └── history/
+│       └── view_history.dart
+├── models/
+│   └── user_model.dart
+│   └── gate_pass_model.dart
+├── services/
+│   └── auth_service.dart
+│   └── firestore_service.dart
