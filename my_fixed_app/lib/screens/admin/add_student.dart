@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:http/http.dart' as http;
-import 'package:cross_file/cross_file.dart';
+
+ import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 class AddStudentPage extends StatefulWidget {
   const AddStudentPage({super.key});
@@ -48,52 +50,52 @@ class _AddStudentPageState extends State<AddStudentPage> {
     return File(result.path);
   }
 
-  Future<void> _submitForm() async {
-    if (!_formKey.currentState!.validate()) return;
 
-    var uri = Uri.parse("http://192.168.13.144:5000/api/add-student");
-    var request = http.MultipartRequest('POST', uri);
+Future<void> _submitForm() async {
+  if (!_formKey.currentState!.validate()) return;
 
-    request.fields['name'] = _nameController.text;
-    request.fields['dob'] = _dobController.text;
-    request.fields['department'] = _departmentController.text;
-    request.fields['address'] = _addressController.text;
-    request.fields['phone'] = _phoneController.text;
-    request.fields['gender'] = _genderController.text;
-    request.fields['guardianName'] = _guardianNameController.text;
-    request.fields['guardianPhNo'] = _guardianPhoneController.text;
-    request.fields['username'] = _usernameController.text;
-    request.fields['password'] = _passwordController.text;
+  try {
+    String? imageUrl;
 
+    // Upload image to Firebase Storage if available
     if (_profileImage != null) {
-      request.files.add(await http.MultipartFile.fromPath(
-        'profileImage',
-        _profileImage!.path,
-      ));
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('student_profiles')
+          .child('${DateTime.now().millisecondsSinceEpoch}.jpg');
+      
+      await storageRef.putFile(_profileImage!);
+      imageUrl = await storageRef.getDownloadURL();
     }
 
-    try {
-    var response = await request.send();
+    // Add student data to Firestore
+    await FirebaseFirestore.instance.collection('students').add({
+      'name': _nameController.text,
+      'dob': _dobController.text,
+      'department': _departmentController.text,
+      'address': _addressController.text,
+      'phone': _phoneController.text,
+      'gender': _genderController.text,
+      'guardianName': _guardianNameController.text,
+      'guardianPhNo': _guardianPhoneController.text,
+      'username': _usernameController.text,
+      'password': _passwordController.text, // ⚠️ NEVER store plaintext passwords in real apps
+      'profileImageUrl': imageUrl ?? '',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
 
-    if (response.statusCode == 200) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Student successfully added!')),
-      );
-      _clearForm();
-    } else {
-      final responseBody = await response.stream.bytesToString();
-      print("Server error response: $responseBody");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to add student.')),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Student successfully added!')),
+    );
+    _clearForm();
   } catch (e) {
-    print("Network or server error: $e");
+    print("Firestore error: $e");
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('An error occurred. Please try again.')),
     );
   }
 }
+
 
   void _clearForm() {
     _nameController.clear();

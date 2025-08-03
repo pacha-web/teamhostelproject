@@ -8,6 +8,8 @@ class ViewHistoryPage extends StatelessWidget {
     // Add more data here
   ];
 
+  ViewHistoryPage({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(

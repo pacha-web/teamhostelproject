@@ -41,15 +41,26 @@ class HostelApp extends StatelessWidget {
   }
 }
 
-// ✅ Updated GoRouter Configuration
+/// ✅ Centralized Route Configuration using GoRouter
 final GoRouter _router = GoRouter(
+  initialLocation: '/',
+  // Optional redirect logic for future authentication (uncomment to use)
+  /*
+  redirect: (context, state) {
+    final isLoggedIn = FirebaseAuth.instance.currentUser != null;
+    if (!isLoggedIn && state.location != '/signin') {
+      return '/signin';
+    }
+    return null;
+  },
+  */
   routes: <RouteBase>[
     GoRoute(
       path: '/',
       builder: (context, state) => const SplashScreen(),
     ),
     GoRoute(
-      path: '/signin', // ✅ Correct login route
+      path: '/signin',
       builder: (context, state) => const UniversalSignIn(),
     ),
     GoRoute(
@@ -58,7 +69,7 @@ final GoRouter _router = GoRouter(
     ),
     GoRoute(
       path: '/add-student',
-      builder: (context, state) =>  AddStudentPage(),
+      builder: (context, state) => AddStudentPage(),
     ),
     GoRoute(
       path: '/requested-gate-pass',
@@ -68,22 +79,20 @@ final GoRouter _router = GoRouter(
       path: '/qr-scanner',
       builder: (context, state) => const QRScannerPage(),
     ),
-   GoRoute(
-  path: '/student-home',
-  builder: (context, state) {
-    final extra = state.extra as Map<String, dynamic>?;
+    GoRoute(
+      path: '/student-home',
+      builder: (context, state) {
+        final extra = state.extra as Map<String, dynamic>?;
 
-    final studentName = extra?['studentName'] ?? 'Student';
-    final profileImageUrl = extra?['profileImageUrl'] ?? '';
+        final studentName = extra?['studentName'] ?? 'Student';
+        final profileImageUrl = extra?['profileImageUrl'] ?? '';
 
-    return StudentHomeScreen(
-      studentName: studentName,
-      profileImageUrl: profileImageUrl,
-    );
-  },
-),
-
-
+        return StudentHomeScreen(
+          studentName: studentName,
+          profileImageUrl: profileImageUrl,
+        );
+      },
+    ),
     GoRoute(
       path: '/student-list',
       builder: (context, state) => const StudentListPage(),
