@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "187331868551",
+    "project_id": "hostel-gpass",
+    "storage_bucket": "hostel-gpass.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:187331868551:android:e653f38dccf83950900522",
+        "android_client_info": {
+          "package_name": "com.college.hostel"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBWJQ1rWNAwUFxlOyWwTYybUeiSiTgZFbs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
