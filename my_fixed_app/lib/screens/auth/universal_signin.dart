@@ -1,29 +1,34 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class UniversalSignIn extends StatefulWidget {
   const UniversalSignIn({super.key});
 
   @override
-  _UniversalSigninState createState() => _UniversalSigninState();
+  State<UniversalSignIn> createState() => _UniversalSignInState();
 }
 
+class _UniversalSignInState extends State<UniversalSignIn> {
+  final _formKey = GlobalKey<FormState>();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-class _UniversalSigninState extends State<UniversalSignIn> {
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
   String _selectedRole = 'Student';
   String _errorMessage = '';
   int _failedAttempts = 0;
   DateTime? _blockTime;
   Timer? _timer;
 
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+
   void _startTimer() {
     _timer?.cancel();
-    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_blockTime != null && DateTime.now().isAfter(_blockTime!)) {
         setState(() {
           _errorMessage = '';
@@ -37,61 +42,73 @@ class _UniversalSigninState extends State<UniversalSignIn> {
     });
   }
 
-  void _handleLogin(BuildContext context) async {
-    final username = _usernameController.text.trim();
+  Future<void> _handleLogin(BuildContext context) async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final email = _usernameController.text.trim();
     final password = _passwordController.text;
 
-    if (_selectedRole == 'Admin') {
-      if (username == 'admin' && password == 'admin123') {
-        context.go('/admin');
-      } else {
-        _setError("Invalid Admin credentials");
-      }
-    } else if (_selectedRole == 'Security') {
-      if (username == 'security' && password == 'sec123') {
-        context.go('/qr-scanner');
-      } else {
-        _setError("Invalid Security credentials");
-      }
-    } else if (_selectedRole == 'Student') {
-      if (_blockTime != null && DateTime.now().isBefore(_blockTime!)) {
-        final remaining = _blockTime!.difference(DateTime.now()).inSeconds;
-        setState(() {
-          _errorMessage = 'Blocked. Try in ${remaining}s';
-        });
-        return;
-      }
-
-      try {
-        final response = await http.post(
-          Uri.parse('http://192.168.13.144:5000/api/login'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'username': username, 'password': password}),
-        );
-
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final student = data['student'];
-          if (student != null) {
-           context.go(
-  '/student-home',
-  
-  extra: {
-    'studentName': student['name'],
-    'profileImageUrl': 'http://192.168.13.144:5000${student['profileImage']}',
-  },
-);
-
-          } else {
-            _handleFailure("Invalid Student credentials");
-          }
-        } else {
-          _handleFailure("Login failed");
-        }
-      } catch (e) {
-        _setError("Network error");
-      }
+    if (_blockTime != null && DateTime.now().isBefore(_blockTime!)) {
+      final remaining = _blockTime!.difference(DateTime.now()).inSeconds;
+      _setError('Blocked. Try again in ${remaining}s');
+      return;
     }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final userCredential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      final user = userCredential.user;
+
+      if (user != null) {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+
+        if (!doc.exists || !doc.data()!.containsKey('role')) {
+          _handleFailure('User role not found');
+          return;
+        }
+
+        final role = doc['role'];
+
+        // Ensure user selects the correct role at login
+        if (role.toLowerCase() != _selectedRole.toLowerCase()) {
+          _handleFailure('Incorrect role selected for this account');
+          return;
+        }
+
+        switch (role.toLowerCase()) {
+          case 'admin':
+            context.go('/admin');
+            break;
+          case 'security':
+            context.go('/qr-scanner');
+            break;
+          case 'student':
+            context.go('/student-home', extra: {
+              'studentName': 'Sample Student',
+              'profileImageUrl': '',
+            });
+            break;
+          default:
+            _handleFailure('Unrecognized role');
+        }
+      } else {
+        _handleFailure('User not found');
+      }
+    } on FirebaseAuthException catch (e) {
+      _handleFailure(_getErrorMessage(e.code));
+    } catch (e) {
+      _setError('Unexpected error occurred');
+    }
+
+    setState(() => _isLoading = false);
   }
 
   void _handleFailure(String message) {
@@ -99,16 +116,31 @@ class _UniversalSigninState extends State<UniversalSignIn> {
       _failedAttempts++;
       _errorMessage = message;
       if (_failedAttempts >= 5) {
-        _blockTime = DateTime.now().add(Duration(minutes: 5));
+        _blockTime = DateTime.now().add(const Duration(minutes: 5));
         _startTimer();
       }
     });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _setError(String message) {
-    setState(() {
-      _errorMessage = message;
-    });
+    setState(() => _errorMessage = message);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _getErrorMessage(String code) {
+    switch (code) {
+      case 'invalid-email':
+        return 'Invalid email address';
+      case 'user-disabled':
+        return 'Account disabled';
+      case 'user-not-found':
+        return 'No account found';
+      case 'wrong-password':
+        return 'Wrong password';
+      default:
+        return 'Login failed: $code';
+    }
   }
 
   @override
@@ -126,50 +158,81 @@ class _UniversalSigninState extends State<UniversalSignIn> {
         : 0;
 
     return Scaffold(
-      appBar: AppBar(title: Text('Universal Sign-In')),
+      appBar: AppBar(title: const Text('Universal Sign-In')),
       body: Padding(
-        padding: EdgeInsets.all(16),
-        child: Column(
-          children: [
-            DropdownButton<String>(
-              value: _selectedRole,
-              onChanged: (newValue) {
-                setState(() {
-                  _selectedRole = newValue!;
-                  _errorMessage = '';
-                });
-              },
-              items: ['Student', 'Admin', 'Security']
-                  .map((role) => DropdownMenuItem(
-                        value: role,
-                        child: Text(role),
-                      ))
-                  .toList(),
-            ),
-            SizedBox(height: 16),
-            TextField(
-              controller: _usernameController,
-              decoration: InputDecoration(labelText: 'Username'),
-            ),
-            SizedBox(height: 12),
-            TextField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: InputDecoration(labelText: 'Password'),
-            ),
-            SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => _handleLogin(context),
-              child: Text('Login'),
-            ),
-            if (_errorMessage.isNotEmpty) ...[
-              SizedBox(height: 20),
-              Text(_errorMessage, style: TextStyle(color: Colors.red)),
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              DropdownButton<String>(
+                value: _selectedRole,
+                onChanged: (newValue) {
+                  setState(() {
+                    _selectedRole = newValue!;
+                    _errorMessage = '';
+                  });
+                },
+                items: ['Student', 'Admin', 'Security']
+                    .map((role) => DropdownMenuItem(
+                          value: role,
+                          child: Text(role),
+                        ))
+                    .toList(),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _usernameController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) return 'Enter email';
+                  if (!value.contains('@')) return 'Enter valid email';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _passwordController,
+                obscureText: _obscurePassword,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+                validator: (value) =>
+                    value == null || value.isEmpty ? 'Enter password' : null,
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _isLoading ? null : () => _handleLogin(context),
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Login'),
+              ),
               if (_blockTime != null)
-                Text('Wait ${remainingTime}s',
-                    style: TextStyle(color: Colors.orange)),
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Blocked for ${remainingTime}s',
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
             ],
-          ],
+          ),
         ),
       ),
     );

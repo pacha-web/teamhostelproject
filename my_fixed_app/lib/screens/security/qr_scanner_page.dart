@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 
 class QRScannerPage extends StatefulWidget {
@@ -58,10 +60,43 @@ class _QRScannerPageState extends State<QRScannerPage> {
     });
   }
 
+  Future<void> _confirmLogout() async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldLogout == true) {
+      await FirebaseAuth.instance.signOut(); // ✅ Ensure logout
+      context.go('/signin');                // 🔁 Navigate to login
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('QR Scanner - Security')),
+      appBar: AppBar(
+        title: const Text('QR Scanner - Security'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _confirmLogout,
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           Column(
@@ -95,9 +130,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
                 child: Container(
                   padding: const EdgeInsets.all(20),
                   width: double.infinity,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                  ),
+                  color: Colors.white,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [

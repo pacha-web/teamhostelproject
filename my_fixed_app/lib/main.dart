@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
-
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
+
+// Firebase options file (generated using flutterfire configure)
+import 'firebase_options.dart';
 
 // Screens
 import 'screens/splash_screen.dart';
@@ -18,7 +22,11 @@ import 'screens/auth/universal_signin.dart';
 // Security
 import 'screens/security/qr_scanner_page.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const HostelApp());
 }
 
@@ -42,19 +50,24 @@ class HostelApp extends StatelessWidget {
   }
 }
 
-/// ✅ Centralized Route Configuration using GoRouter
+/// ✅ GoRouter Configuration
 final GoRouter _router = GoRouter(
   initialLocation: '/',
-  // Optional redirect logic for future authentication (uncomment to use)
-  /*
   redirect: (context, state) {
-    final isLoggedIn = FirebaseAuth.instance.currentUser != null;
-    if (!isLoggedIn && state.location != '/signin') {
-      return '/signin';
-    }
-    return null;
-  },
-  */
+  final user = FirebaseAuth.instance.currentUser;
+  final isLoggedIn = user != null;
+  final loggingIn = state.uri.path == '/signin'; // ✅ Correct way to get current route path
+
+  if (!isLoggedIn && !loggingIn) {
+    return '/signin';
+  }
+
+  if (isLoggedIn && loggingIn) {
+    return '/student-home';
+  }
+
+  return null;
+},
   routes: <RouteBase>[
     GoRoute(
       path: '/',
@@ -83,10 +96,9 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/student-home',
       builder: (context, state) {
-        final extra = state.extra as Map<String, dynamic>?;
-
-        final studentName = extra?['studentName'] ?? 'Student';
-        final profileImageUrl = extra?['profileImageUrl'] ?? '';
+        final extra = state.extra as Map<String, dynamic>? ?? {};
+        final studentName = extra['studentName'] ?? 'Student';
+        final profileImageUrl = extra['profileImageUrl'] ?? '';
 
         return StudentHomeScreen(
           studentName: studentName,
