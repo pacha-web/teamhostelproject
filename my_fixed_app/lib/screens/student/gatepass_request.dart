@@ -1,6 +1,7 @@
+// gatepass_request.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 
 class GatePassRequest extends StatefulWidget {
   const GatePassRequest({super.key});
@@ -10,6 +11,7 @@ class GatePassRequest extends StatefulWidget {
 }
 
 class _GatePassRequestState extends State<GatePassRequest> {
+  final _formKey = GlobalKey<FormState>();
   final nameController = TextEditingController();
   final rollController = TextEditingController();
   final deptController = TextEditingController();
@@ -17,85 +19,109 @@ class _GatePassRequestState extends State<GatePassRequest> {
   final departureController = TextEditingController();
   final returnController = TextEditingController();
 
+  bool _isSubmitting = false;
+
   Future<void> submitRequest() async {
-    final url = Uri.parse("http://192.168.13.144:5000/api/requests");
+    if (!_formKey.currentState!.validate()) return;
 
-    final response = await http.post(
-      url,
-      headers: {"Content-Type": "application/json"},
-      body: json.encode({
-        "name": nameController.text,
-        "roll": rollController.text,
-        "department": deptController.text,
-        "reason": reasonController.text,
-        "departureTime": departureController.text,
-        "returnTime": returnController.text,
-      }),
-    );
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid;
+    final email = user?.email;
 
-    if (response.statusCode == 200) {
+    setState(() => _isSubmitting = true);
+
+    try {
+      final docRef = FirebaseFirestore.instance.collection('gatepass_requests').doc();
+
+      final data = {
+        'uid': uid ?? '',
+        'email': email ?? '',
+        'studentName': nameController.text.trim(),
+        'roll': rollController.text.trim(),
+        'department': deptController.text.trim(),
+        'reason': reasonController.text.trim(),
+        'departureTime': departureController.text.trim(),
+        'returnTime': returnController.text.trim(),
+        'status': 'Pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      await docRef.set(data);
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Request submitted successfully')),
       );
       Navigator.pop(context);
-    } else {
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to submit request')),
+        SnackBar(content: Text('Failed to submit request: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    rollController.dispose();
+    deptController.dispose();
+    reasonController.dispose();
+    departureController.dispose();
+    returnController.dispose();
+    super.dispose();
+  }
+
+  Widget _buildFormField(String label, IconData icon, TextEditingController controller,
+      {int maxLines = 1}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: TextFormField(
+        controller: controller,
+        maxLines: maxLines,
+        validator: (v) => v == null || v.trim().isEmpty ? '$label is required' : null,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Request Gate Pass', style: TextStyle(color: Colors.white)),
+        title: const Text('Request Gate Pass'),
         backgroundColor: const Color.fromARGB(255, 23, 16, 161),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
       ),
-      body: Container(
-        padding: const EdgeInsets.all(20.0),
-        child: ListView(
-          children: [
-            _buildFormField("Full Name", Icons.person_outline, nameController),
-            _buildFormField("Roll Number", Icons.numbers_outlined, rollController),
-            _buildFormField("Department", Icons.school_outlined, deptController),
-            _buildFormField("Reason for Leave", Icons.note_outlined, reasonController, maxLines: 3),
-            _buildFormField("Departure Time", Icons.access_time_outlined, departureController),
-            _buildFormField("Return Time", Icons.access_time_outlined, returnController),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: submitRequest,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color.fromARGB(255, 17, 9, 172),
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 50),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            children: [
+              _buildFormField('Full Name', Icons.person_outline, nameController),
+              _buildFormField('Roll Number', Icons.numbers_outlined, rollController),
+              _buildFormField('Department', Icons.school_outlined, deptController),
+              _buildFormField('Reason for Leave', Icons.note_outlined, reasonController, maxLines: 4),
+              _buildFormField('Departure Time', Icons.access_time_outlined, departureController),
+              _buildFormField('Return Time', Icons.access_time_outlined, returnController),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _isSubmitting ? null : submitRequest,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color.fromARGB(255, 17, 9, 172),
+                  minimumSize: const Size(double.infinity, 50),
                 ),
+                child: _isSubmitting
+                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Submit Request'),
               ),
-              child: const Text('Submit Request'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFormField(String label, IconData icon, TextEditingController controller, {int maxLines = 1}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
-      child: TextFormField(
-        controller: controller,
-        maxLines: maxLines,
-        decoration: InputDecoration(
-          labelText: label,
-          prefixIcon: Icon(icon),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
+            ],
           ),
         ),
       ),

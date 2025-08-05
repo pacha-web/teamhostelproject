@@ -1,126 +1,60 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ViewHistoryPage extends StatelessWidget {
-  final List<Map<String, dynamic>> passes = [
-    // Example data
-    {'status': 'In', 'name': 'John Doe', 'date': '2025-04-12'},
-    {'status': 'Out', 'name': 'Jane Smith', 'date': '2025-04-12'},
-    // Add more data here
-  ];
-
-  ViewHistoryPage({super.key});
+  const ViewHistoryPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = FirebaseAuth.instance.currentUser;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('View History'),
-        backgroundColor: Colors.blue, // Direct use of Colors.blue
+        backgroundColor: Colors.blue,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildDateSection(),
-            const SizedBox(height: 20),
-            _buildTypeButton('Gone Home', passes),
-            const SizedBox(height: 10),
-            _buildTypeButton('Other Activity', passes),
-            const SizedBox(height: 20),
-            _buildRequestList(passes),
-          ],
-        ),
-      ),
-    );
-  }
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('gatepasses')
+            .where('uid', isEqualTo: currentUser?.uid)
+            .orderBy('timestamp', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return const Center(child: Text('Error loading data'));
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-  Widget _buildDateSection() {
-    return const Text(
-      'Gate Pass Approval Date: 2025-04-12',
-      style: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.bold,
-        color: Colors.blue, // Using Colors.blue here
-      ),
-    );
-  }
+          final docs = snapshot.data!.docs;
 
-  Widget _buildTypeButton(String label, List<Map<String, dynamic>> passes) {
-    return ElevatedButton(
-      onPressed: passes.isEmpty ? null : () {},
-      style: ElevatedButton.styleFrom(
-        backgroundColor: passes.isEmpty ? Colors.grey : Colors.blue, // Using Colors.blue
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-      ),
-    );
-  }
+          if (docs.isEmpty) return const Center(child: Text('No history available'));
 
-  Widget _buildRequestList(List<Map<String, dynamic>> passes) {
-    return Expanded(
-      child: ListView.builder(
-        itemCount: passes.length,
-        itemBuilder: (context, index) {
-          final pass = passes[index];
-          return Card(
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: ListTile(
-              contentPadding: const EdgeInsets.all(16),
-              title: Text(pass['name']),
-              subtitle: Text('Status: ${pass['status']}'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildStatusButton('In', pass['status']),
-                  const SizedBox(width: 8),
-                  _buildStatusButton('Out', pass['status']),
-                ],
-              ),
-            ),
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              final data = docs[index].data() as Map<String, dynamic>;
+              final name = data['name'] ?? 'Unknown';
+              final status = data['status'] ?? 'Unknown';
+              final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
+              final formattedTime = timestamp != null
+                  ? DateFormat('yyyy-MM-dd – hh:mm a').format(timestamp)
+                  : 'Time not available';
+
+              return Card(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                child: ListTile(
+                  title: Text(name),
+                  subtitle: Text('Status: $status\nTime: $formattedTime'),
+                  trailing: Icon(
+                    status == 'In' ? Icons.login : Icons.logout,
+                    color: status == 'In' ? Colors.green : Colors.red,
+                  ),
+                ),
+              );
+            },
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildStatusButton(String status, String currentStatus) {
-    Color buttonColor;
-    String buttonText;
-
-    // Determine the color based on the current status
-    if (status == 'In') {
-      // If the current status is 'In', make the 'In' button green, and 'Out' button red
-      buttonColor = currentStatus == 'In' ? Colors.green : Colors.red;
-      buttonText = 'In';
-    } else {
-      // If the current status is 'Out', make the 'Out' button green, and 'In' button red
-      buttonColor = currentStatus == 'Out' ? Colors.green : Colors.red;
-      buttonText = 'Out';
-    }
-
-    return ElevatedButton(
-      onPressed: () {
-        // Here, you can add your backend call or logic to update the status
-        // For now, just change the color of the buttons.
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: buttonColor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      child: Text(
-        buttonText,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
       ),
     );
   }

@@ -1,142 +1,73 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
-class ViewRequests extends StatefulWidget {
-  const ViewRequests({super.key});
-
-  @override
-  State<ViewRequests> createState() => _ViewRequestsState();
-}
-
-class _ViewRequestsState extends State<ViewRequests> {
-  List<dynamic> requests = [];
-  bool isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    fetchRequests();
-  }
-
-  Future<void> fetchRequests() async {
-    try {
-      final url = Uri.parse("http://192.168.13.144:5000/api/my-requests");
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer YOUR_TOKEN', // replace or remove if unused
-        },
-      );
-
-      if (response.statusCode == 200) {
-        setState(() {
-          requests = json.decode(response.body);
-          isLoading = false;
-        });
-      } else {
-        setState(() => isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${response.statusCode}')),
-        );
-      }
-    } catch (e) {
-      setState(() => isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to fetch requests: $e')),
-      );
-    }
-  }
-
-  Color getStatusColor(String status) {
-    switch (status) {
-      case 'Approved':
-        return Colors.green;
-      case 'Rejected':
-        return Colors.red;
-      default:
-        return Colors.orange;
-    }
-  }
-
-  Widget buildStatusMessage(String status) {
-    if (status == 'Approved') {
-      return const Text(
-        '✅ Your gate pass has been accepted. Please show this message at the gate.',
-        style: TextStyle(fontSize: 14, color: Colors.green),
-      );
-    } else if (status == 'Rejected') {
-      return const Text(
-        '❌ Your gate pass request was rejected by the admin.',
-        style: TextStyle(fontSize: 14, color: Colors.red),
-      );
-    } else {
-      return const Text(
-        '⏳ Your request is under review.',
-        style: TextStyle(fontSize: 14, color: Colors.orange),
-      );
-    }
-  }
-
-  Widget buildDetailRow(String label, String? value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Text(
-        "$label: ${value ?? 'N/A'}",
-        style: const TextStyle(fontSize: 15),
-      ),
-    );
-  }
+class MyGatePass extends StatelessWidget {
+  const MyGatePass({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My Gate Pass Requests'),
-        backgroundColor: Colors.blueAccent,
+        title: const Text("My Gate Pass"),
+        backgroundColor: Colors.blue,
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : requests.isEmpty
-              ? const Center(child: Text('No requests found.'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: requests.length,
-                  itemBuilder: (context, index) {
-                    final req = requests[index];
-                    final status = req['status'] ?? 'Pending';
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('gatepass_requests')
+            .where('uid', isEqualTo: uid)
+            .orderBy('createdAt', descending: true)
+            .limit(1)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      elevation: 4,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            buildDetailRow("Reason", req['reason']),
-                            buildDetailRow("Departure Time", req['departureTime']),
-                            buildDetailRow("Return Time", req['returnTime']),
-                            buildDetailRow("Date Requested", req['createdAt']?.substring(0, 10)),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Status: $status',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: getStatusColor(status),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            buildStatusMessage(status),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+          if (snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text("No gate pass found."));
+          }
+
+          var pass = snapshot.data!.docs.first;
+          var status = pass['status'];
+
+          if (status == "Approved") {
+            // You can encode the passId or all details
+            String qrData = pass.id; // OR jsonEncode(pass.data())
+
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("Your Gate Pass is Approved!",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 20),
+                  QrImageView(
+                    data: qrData,
+                    version: QrVersions.auto,
+                    size: 200.0,
+                  ),
+                  const SizedBox(height: 10),
+                  Text("Scan this QR at the gate", style: TextStyle(color: Colors.grey[600])),
+                ],
+              ),
+            );
+          } else if (status == "Rejected") {
+            return const Center(
+              child: Text("Your Gate Pass is Rejected.",
+                  style: TextStyle(fontSize: 18, color: Colors.red)),
+            );
+          } else {
+            return const Center(
+              child: Text("Your request is still pending.",
+                  style: TextStyle(fontSize: 18, color: Colors.orange)),
+            );
+          }
+        },
+      ),
     );
   }
 }

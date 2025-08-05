@@ -1,6 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:go_router/go_router.dart';
 
 class StudentListPage extends StatefulWidget {
@@ -11,242 +10,188 @@ class StudentListPage extends StatefulWidget {
 }
 
 class _StudentListPageState extends State<StudentListPage> {
-  List<Student> students = [];
-  List<Student> filteredStudents = [];
   final TextEditingController _searchController = TextEditingController();
-  bool _isLoading = true;
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
-    fetchStudents();
-  }
-
-  Future<void> fetchStudents() async {
-    setState(() => _isLoading = true);
-    try {
-      final response =
-          await http.get(Uri.parse("http://192.168.13.144:5000/api/students"));
-      if (response.statusCode == 200) {
-        final List<dynamic> studentList = json.decode(response.body);
-        students = studentList.map((json) => Student.fromJson(json)).toList();
-        for (var s in students) {
-          print('Profile Image: ${s.profileImage}');
-        }
-        setState(() {
-          filteredStudents = students;
-          _isLoading = false;
-        });
-      } else {
-        showError("Failed to load students.");
-      }
-    } catch (e) {
-      showError("Error fetching students: $e");
-    }
-  }
-
-  void _deleteStudent(int id) async {
-    try {
-      final response =
-          await http.delete(Uri.parse("http://192.168.13.144:5000/api/students/$id"));
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Student deleted successfully")),
-        );
-        fetchStudents();
-      } else {
-        showError("Failed to delete student.");
-      }
-    } catch (e) {
-      showError("Error deleting student: $e");
-    }
-  }
-
-  void showError(String message) {
-    setState(() => _isLoading = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  void _searchStudents(String query) {
-    final lowerQuery = query.toLowerCase();
-    setState(() {
-      filteredStudents = students.where((student) {
-        return student.name.toLowerCase().contains(lowerQuery) ||
-            student.department.toLowerCase().contains(lowerQuery) ||
-            student.guardianName.toLowerCase().contains(lowerQuery);
-      }).toList();
+    _searchController.addListener(() {
+      setState(() {
+        _query = _searchController.text.trim().toLowerCase();
+      });
     });
   }
 
-  void _confirmDelete(int id) {
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  // Helper to map a Firestore doc to Student model
+  Student _studentFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data();
+    return Student(
+      id: doc.id,
+      name: data['name'] ?? '',
+      department: data['department'] ?? '',
+      phone: data['phone'] ?? '',
+      address: data['address'] ?? '',
+      dob: data['dob'] ?? '',
+      gender: data['gender'] ?? '',
+      guardianName: data['guardianName'] ?? '',
+      guardianPhone: data['guardianPhNo'] ?? '',
+      profileImageUrl: (data['profileImageUrl'] is String) ? data['profileImageUrl'] as String : '',
+    );
+  }
+
+  // Delete document by doc id
+  Future<void> _deleteStudent(String docId) async {
+    try {
+      await FirebaseFirestore.instance.collection('students').doc(docId).delete();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Student deleted successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Delete error: $e')),
+        );
+      }
+    }
+  }
+
+  void _confirmDelete(String docId) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Confirm Delete"),
-        content: const Text("Are you sure you want to delete this student?"),
+        title: const Text('Confirm Delete'),
+        content: const Text('Are you sure you want to delete this student?'),
         actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text("Cancel")),
-          TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _deleteStudent(id);
-              },
-              child: const Text("Delete", style: TextStyle(color: Colors.red))),
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteStudent(docId);
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
   }
 
+  // Filter function client-side (simple substring search)
+  bool _matchesQuery(Student s) {
+    if (_query.isEmpty) return true;
+    final lower = _query;
+    return s.name.toLowerCase().contains(lower) ||
+        s.department.toLowerCase().contains(lower) ||
+        s.guardianName.toLowerCase().contains(lower) ||
+        s.phone.toLowerCase().contains(lower);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Stream students ordered by createdAt (descending). If you didn't store createdAt, you can order by name.
+    final stream = FirebaseFirestore.instance
+        .collection('students')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Student List"),
+        title: const Text('Student List'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            context.go('/admin'); // Using go_router to navigate back
-          },
+          onPressed: () => context.go('/admin'),
         ),
       ),
       body: SafeArea(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: TextField(
-                      controller: _searchController,
-                      onChanged: _searchStudents,
-                      decoration: const InputDecoration(
-                        labelText: "Search",
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.search),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: filteredStudents.isEmpty
-                        ? const Center(child: Text("No students found."))
-                        : ListView.builder(
-                            itemCount: filteredStudents.length,
-                            itemBuilder: (context, index) {
-                              final student = filteredStudents[index];
-                              final baseUrl = 'http://192.168.13.144:5000';
-                              final profileImageUrl =
-                                  '$baseUrl${student.profileImage?.startsWith('/') ?? false ? '' : '/'}${student.profileImage ?? ''}';
-
-                              return Card(
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
-                                child: ListTile(
-                                  leading: (student.profileImage != null &&
-                                          student.profileImage!.isNotEmpty)
-                                      ? CircleAvatar(
-                                          backgroundImage:
-                                              NetworkImage(profileImageUrl),
-                                        )
-                                      : const CircleAvatar(
-                                          child: Icon(Icons.person),
-                                        ),
-                                  title: Text(student.name),
-                                  subtitle: Text(
-                                      "Dept: ${student.department}\nPhone: ${student.phone}"),
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.delete,
-                                        color: Colors.red),
-                                    onPressed: () => _confirmDelete(student.id),
-                                  ),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            StudentDetailPage(student: student),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
+        child: Column(
+          children: [
+            // Search field
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  labelText: 'Search',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.search),
+                ),
               ),
-      ),
-    );
-  }
-}
+            ),
 
-class StudentDetailPage extends StatelessWidget {
-  final Student student;
+            // Streamed list
+            Expanded(
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: stream,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    return Center(child: Text('Error: ${snapshot.error}'));
+                  }
+                  final docs = snapshot.data?.docs ?? [];
+                  final students = docs.map(_studentFromDoc).toList();
 
-  const StudentDetailPage({super.key, required this.student});
+                  // Client-side filtering (simple)
+                  final filtered = students.where(_matchesQuery).toList();
 
-  @override
-  Widget build(BuildContext context) {
-    final baseUrl = 'http://192.168.13.144:5000';
-    final profileImageUrl =
-        '$baseUrl${student.profileImage?.startsWith('/') ?? false ? '' : '/'}${student.profileImage ?? ''}';
+                  if (filtered.isEmpty) {
+                    return const Center(child: Text('No students found.'));
+                  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(student.name),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              (student.profileImage != null && student.profileImage!.isNotEmpty)
-                  ? CircleAvatar(
-                      radius: 60,
-                      backgroundImage: NetworkImage(profileImageUrl),
-                    )
-                  : const CircleAvatar(
-                      radius: 60,
-                      child: Icon(Icons.person, size: 60),
-                    ),
-              const SizedBox(height: 20),
-              detailRow('Name', student.name),
-              detailRow('Department', student.department),
-              detailRow('Phone', student.phone),
-              detailRow('Address', student.address),
-              detailRow('Date of Birth', student.dob),
-              detailRow('Gender', student.gender),
-              detailRow('Guardian Name', student.guardianName),
-              detailRow('Guardian Phone', student.guardianPhone),
-            ],
-          ),
+                  return ListView.builder(
+                    itemCount: filtered.length,
+                    itemBuilder: (context, index) {
+                      final student = filtered[index];
+
+                      return Card(
+                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: ListTile(
+                          leading: (student.profileImageUrl != null && student.profileImageUrl!.isNotEmpty)
+                              ? CircleAvatar(
+                                  backgroundImage: NetworkImage(student.profileImageUrl!),
+                                )
+                              : const CircleAvatar(child: Icon(Icons.person)),
+                          title: Text(student.name),
+                          subtitle: Text('Dept: ${student.department}\nPhone: ${student.phone}'),
+                          isThreeLine: true,
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _confirmDelete(student.id),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => StudentDetailPage(student: student),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
-
-  Widget detailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$label: ',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          Expanded(child: Text(value)),
-        ],
-      ),
-    );
-  }
 }
 
+// Student model adapted for Firestore doc id string
 class Student {
-  final int id;
+  final String id;
   final String name;
   final String department;
   final String phone;
@@ -255,7 +200,7 @@ class Student {
   final String gender;
   final String guardianName;
   final String guardianPhone;
-  final String? profileImage;
+  final String? profileImageUrl;
 
   Student({
     required this.id,
@@ -267,22 +212,55 @@ class Student {
     required this.gender,
     required this.guardianName,
     required this.guardianPhone,
-    this.profileImage,
+    this.profileImageUrl,
   });
+}
 
-  factory Student.fromJson(Map<String, dynamic> json) {
-    return Student(
-      id: json['id'] ?? 0,
-      name: json['name'] ?? '',
-      department: json['department'] ?? '',
-      phone: json['phone'] ?? '',
-      address: json['address'] ?? '',
-      dob: json['dob'] != null ? json['dob'].toString().split('T')[0] : '',
+// Details page (re-usable for Firestore-backed Student)
+class StudentDetailPage extends StatelessWidget {
+  final Student student;
+  const StudentDetailPage({super.key, required this.student});
 
-      gender: json['gender'] ?? '',
-      guardianName: json['guardianName'] ?? '',
-      guardianPhone: json['guardianPhone'] ?? '',
-      profileImage: json['profileImage'],
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(student.name),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              (student.profileImageUrl != null && student.profileImageUrl!.isNotEmpty)
+                  ? CircleAvatar(radius: 60, backgroundImage: NetworkImage(student.profileImageUrl!))
+                  : const CircleAvatar(radius: 60, child: Icon(Icons.person, size: 60)),
+              const SizedBox(height: 20),
+              _detailRow('Name', student.name),
+              _detailRow('Department', student.department),
+              _detailRow('Phone', student.phone),
+              _detailRow('Address', student.address),
+              _detailRow('Date of Birth', student.dob),
+              _detailRow('Gender', student.gender),
+              _detailRow('Guardian Name', student.guardianName),
+              _detailRow('Guardian Phone', student.guardianPhone),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$label: ', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Expanded(child: Text(value)),
+        ],
+      ),
     );
   }
 }

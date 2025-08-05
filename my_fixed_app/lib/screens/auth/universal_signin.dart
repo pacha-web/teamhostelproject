@@ -64,48 +64,87 @@ class _UniversalSignInState extends State<UniversalSignIn> {
 
       final user = userCredential.user;
 
-      if (user != null) {
-        final doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
+      if (user == null) {
+        _handleFailure('Authentication failed');
+        return;
+      }
 
-        if (!doc.exists || !doc.data()!.containsKey('role')) {
-          _handleFailure('User role not found');
-          return;
-        }
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
 
-        final role = doc['role'];
+      if (!doc.exists || !doc.data()!.containsKey('role')) {
+        _handleFailure('User role not found');
+        return;
+      }
 
-        // Ensure user selects the correct role at login
-        if (role.toLowerCase() != _selectedRole.toLowerCase()) {
-          _handleFailure('Incorrect role selected for this account');
-          return;
-        }
+      final role = (doc.data()!['role'] ?? '').toString();
 
-        switch (role.toLowerCase()) {
-          case 'admin':
-            context.go('/admin');
-            break;
-          case 'security':
-            context.go('/qr-scanner');
-            break;
-          case 'student':
-            context.go('/student-home', extra: {
-              'studentName': 'Sample Student',
-              'profileImageUrl': '',
-            });
-            break;
-          default:
-            _handleFailure('Unrecognized role');
-        }
-      } else {
-        _handleFailure('User not found');
+      if (role.toLowerCase() != _selectedRole.toLowerCase()) {
+        _handleFailure('Incorrect role selected for this account');
+        return;
+      }
+
+      switch (role.toLowerCase()) {
+        case 'admin':
+          context.go('/admin');
+          break;
+        case 'security':
+          context.go('/qr-scanner');
+          break;
+        case 'student':
+          final studentByUidQuery = await FirebaseFirestore.instance
+              .collection('students')
+              .where('uid', isEqualTo: user.uid)
+              .limit(1)
+              .get();
+
+          DocumentSnapshot<Map<String, dynamic>>? studentDoc;
+          if (studentByUidQuery.docs.isNotEmpty) {
+            studentDoc = studentByUidQuery.docs.first;
+          } else {
+            final byUsername = await FirebaseFirestore.instance
+                .collection('students')
+                .where('username', isEqualTo: email)
+                .limit(1)
+                .get();
+
+            if (byUsername.docs.isNotEmpty) {
+              studentDoc = byUsername.docs.first;
+            } else {
+              final byEmail = await FirebaseFirestore.instance
+                  .collection('students')
+                  .where('email', isEqualTo: email)
+                  .limit(1)
+                  .get();
+              if (byEmail.docs.isNotEmpty) studentDoc = byEmail.docs.first;
+            }
+          }
+
+          if (studentDoc == null) {
+            _handleFailure('Student record not found. Contact admin.');
+            return;
+          }
+
+          final sdata = studentDoc.data()!;
+          final studentName = (sdata['name'] ?? '').toString();
+          final profileImageUrl = (sdata['profileImageUrl'] ?? '').toString();
+
+          context.go('/student-home', extra: {
+            'studentName': studentName,
+            'profileImageUrl': profileImageUrl,
+            'studentDocId': studentDoc.id,
+            'uid': user.uid,
+          });
+          break;
+        default:
+          _handleFailure('Unrecognized role');
       }
     } on FirebaseAuthException catch (e) {
       _handleFailure(_getErrorMessage(e.code));
     } catch (e) {
-      _setError('Unexpected error occurred');
+      _setError('Unexpected error: $e');
     }
 
     setState(() => _isLoading = false);
@@ -158,7 +197,18 @@ class _UniversalSignInState extends State<UniversalSignIn> {
         : 0;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Universal Sign-In')),
+      appBar: AppBar(
+        title: const Text('Universal Sign-In'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.home),
+            tooltip: 'Go to Home',
+            onPressed: () {
+              context.go('/'); // ✅ Navigate to home/splash screen
+            },
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Form(

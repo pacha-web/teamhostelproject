@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class QRScannerPage extends StatefulWidget {
   const QRScannerPage({super.key});
@@ -27,23 +27,18 @@ class _QRScannerPageState extends State<QRScannerPage> {
     setState(() => isLoading = true);
 
     try {
-      final response = await http.post(
-        Uri.parse('https://your-backend-url.com/api/updateStatus'),
-        body: {
-          'qrData': scannedData,
-          'status': status,
-        },
-      );
+      final user = FirebaseAuth.instance.currentUser;
 
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Marked as $status')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to update status')),
-        );
-      }
+      await FirebaseFirestore.instance.collection('gatepasses').add({
+        'name': scannedData, // You can replace with actual student name if available
+        'status': status,
+        'timestamp': FieldValue.serverTimestamp(),
+        'uid': user?.uid ?? 'unknown',
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Marked as $status')),
+      );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
@@ -80,8 +75,8 @@ class _QRScannerPageState extends State<QRScannerPage> {
     );
 
     if (shouldLogout == true) {
-      await FirebaseAuth.instance.signOut(); // ✅ Ensure logout
-      context.go('/signin');                // 🔁 Navigate to login
+      await FirebaseAuth.instance.signOut();
+      context.go('/signin');
     }
   }
 

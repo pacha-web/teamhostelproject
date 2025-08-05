@@ -54,20 +54,23 @@ class HostelApp extends StatelessWidget {
 final GoRouter _router = GoRouter(
   initialLocation: '/',
   redirect: (context, state) {
-  final user = FirebaseAuth.instance.currentUser;
-  final isLoggedIn = user != null;
-  final loggingIn = state.uri.path == '/signin'; // ✅ Correct way to get current route path
+    final user = FirebaseAuth.instance.currentUser;
+    final isLoggedIn = user != null;
+    final loggingIn = state.uri.path == '/signin';
+    final isSplash = state.uri.path == '/';
 
-  if (!isLoggedIn && !loggingIn) {
-    return '/signin';
-  }
+    // ✅ Allow splash screen and sign-in without login
+    if (!isLoggedIn && !loggingIn && !isSplash) {
+      return '/signin';
+    }
 
-  if (isLoggedIn && loggingIn) {
-    return '/student-home';
-  }
+    // ✅ Redirect logged-in users away from login screen
+    if (isLoggedIn && loggingIn) {
+      return '/student-home'; // You can route based on role if needed
+    }
 
-  return null;
-},
+    return null; // no redirect needed
+  },
   routes: <RouteBase>[
     GoRoute(
       path: '/',
