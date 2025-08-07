@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -21,6 +22,9 @@ import 'screens/auth/universal_signin.dart';
 
 // Security
 import 'screens/security/qr_scanner_page.dart';
+
+// Role resolver page
+import 'screens/resolve_role.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,26 +54,55 @@ class HostelApp extends StatelessWidget {
   }
 }
 
-/// ✅ GoRouter Configuration
+/// Small helper so GoRouter refreshes when auth state changes.
+class GoRouterRefreshStream extends ChangeNotifier {
+  GoRouterRefreshStream(Stream<dynamic> stream) {
+    _sub = stream.listen((_) => notifyListeners());
+  }
+
+  late final StreamSubscription<dynamic> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+}
+
+/// GoRouter Config (role-aware, uses state.uri.path to be compatible with older GoRouter)
 final GoRouter _router = GoRouter(
   initialLocation: '/',
+  refreshListenable: GoRouterRefreshStream(FirebaseAuth.instance.authStateChanges()),
   redirect: (context, state) {
     final user = FirebaseAuth.instance.currentUser;
     final isLoggedIn = user != null;
-    final loggingIn = state.uri.path == '/signin';
-    final isSplash = state.uri.path == '/';
 
-    // ✅ Allow splash screen and sign-in without login
-    if (!isLoggedIn && !loggingIn && !isSplash) {
+    // Use state.uri.path (works for older GoRouter versions)
+    final currentPath = state.uri.path; // e.g. "/", "/signin", "/student-home"
+    final loggingIn = currentPath == '/signin' || currentPath == '/';
+    final isResolve = currentPath == '/resolve';
+
+    // If not logged in and trying to access protected pages, send to /signin
+    if (!isLoggedIn && !loggingIn && !isResolve) {
       return '/signin';
     }
 
-    // ✅ Redirect logged-in users away from login screen
-    if (isLoggedIn && loggingIn) {
-      return '/student-home'; // You can route based on role if needed
+    // If logged in and on signin/splash, send to /resolve (resolve decides role)
+    if (isLoggedIn && loggingIn && !isResolve) {
+      return '/resolve';
     }
 
-    return null; // no redirect needed
+    // Allowed routes once signed in (add other pages you want allowed directly)
+    final allowedWhenSignedIn = {
+      '/', '/signin', '/resolve', '/student-home', '/admin', '/qr-scanner',
+      '/requested-gate-pass', '/add-student', '/student-list'
+    };
+
+    if (isLoggedIn && !allowedWhenSignedIn.contains(currentPath)) {
+      return '/resolve';
+    }
+
+    return null; // no redirect
   },
   routes: <RouteBase>[
     GoRoute(
@@ -79,6 +112,10 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/signin',
       builder: (context, state) => const UniversalSignIn(),
+    ),
+    GoRoute(
+      path: '/resolve',
+      builder: (context, state) => const ResolveRolePage(),
     ),
     GoRoute(
       path: '/admin',

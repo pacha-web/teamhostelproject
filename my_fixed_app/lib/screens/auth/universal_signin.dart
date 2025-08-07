@@ -1,3 +1,4 @@
+// universal_signin.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -13,7 +14,7 @@ class UniversalSignIn extends StatefulWidget {
 
 class _UniversalSignInState extends State<UniversalSignIn> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
+  final _usernameController = TextEditingController(); // used as roll number for students
   final _passwordController = TextEditingController();
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -25,6 +26,9 @@ class _UniversalSignInState extends State<UniversalSignIn> {
 
   bool _isLoading = false;
   bool _obscurePassword = true;
+
+  /// MUST MATCH the domain used when creating students in AddStudentPage
+  static const String _studentEmailDomain = 'students.mygate';
 
   void _startTimer() {
     _timer?.cancel();
@@ -45,7 +49,7 @@ class _UniversalSignInState extends State<UniversalSignIn> {
   Future<void> _handleLogin(BuildContext context) async {
     if (!_formKey.currentState!.validate()) return;
 
-    final email = _usernameController.text.trim();
+    String input = _usernameController.text.trim();
     final password = _passwordController.text;
 
     if (_blockTime != null && DateTime.now().isBefore(_blockTime!)) {
@@ -57,8 +61,22 @@ class _UniversalSignInState extends State<UniversalSignIn> {
     setState(() => _isLoading = true);
 
     try {
+      String authEmailToUse;
+
+      if (_selectedRole.toLowerCase() == 'student') {
+        // For students, username is roll number. Build the synthetic email.
+        if (input.isEmpty) {
+          _handleFailure('Enter roll number');
+          return;
+        }
+        authEmailToUse = '${input.toLowerCase()}@$_studentEmailDomain';
+      } else {
+        // For Admin / Security assume they supply a real email as username
+        authEmailToUse = input;
+      }
+
       final userCredential = await _auth.signInWithEmailAndPassword(
-        email: email,
+        email: authEmailToUse,
         password: password,
       );
 
@@ -94,31 +112,36 @@ class _UniversalSignInState extends State<UniversalSignIn> {
           context.go('/qr-scanner');
           break;
         case 'student':
+          // Find student document. Prefer lookup by uid, fallback to username (rollNumber)
+          DocumentSnapshot<Map<String, dynamic>>? studentDoc;
+
           final studentByUidQuery = await FirebaseFirestore.instance
               .collection('students')
               .where('uid', isEqualTo: user.uid)
               .limit(1)
               .get();
 
-          DocumentSnapshot<Map<String, dynamic>>? studentDoc;
           if (studentByUidQuery.docs.isNotEmpty) {
             studentDoc = studentByUidQuery.docs.first;
           } else {
+            // Lookup by roll number (username) using the roll number provided in the login field
             final byUsername = await FirebaseFirestore.instance
                 .collection('students')
-                .where('username', isEqualTo: email)
+                .where('username', isEqualTo: _usernameController.text.trim())
                 .limit(1)
                 .get();
 
             if (byUsername.docs.isNotEmpty) {
               studentDoc = byUsername.docs.first;
             } else {
-              final byEmail = await FirebaseFirestore.instance
+              // As last fallback, try matching authEmail (if you stored it)
+              final authEmail = '${_usernameController.text.trim().toLowerCase()}@$_studentEmailDomain';
+              final byAuthEmail = await FirebaseFirestore.instance
                   .collection('students')
-                  .where('email', isEqualTo: email)
+                  .where('authEmail', isEqualTo: authEmail)
                   .limit(1)
                   .get();
-              if (byEmail.docs.isNotEmpty) studentDoc = byEmail.docs.first;
+              if (byAuthEmail.docs.isNotEmpty) studentDoc = byAuthEmail.docs.first;
             }
           }
 
@@ -196,15 +219,18 @@ class _UniversalSignInState extends State<UniversalSignIn> {
         ? _blockTime!.difference(DateTime.now()).inSeconds
         : 0;
 
+    final isStudent = _selectedRole.toLowerCase() == 'student';
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Universal Sign-In'),
+        title: const Text('Universal Sign-In', style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.blue, // <-- changed to match MyGatePass AppBar
         actions: [
           IconButton(
             icon: const Icon(Icons.home),
             tooltip: 'Go to Home',
             onPressed: () {
-              context.go('/'); // ✅ Navigate to home/splash screen
+              context.go('/'); // Navigate to home/splash screen
             },
           ),
         ],
@@ -233,14 +259,15 @@ class _UniversalSignInState extends State<UniversalSignIn> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _usernameController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                  border: OutlineInputBorder(),
+                keyboardType: isStudent ? TextInputType.text : TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: isStudent ? 'Roll Number' : 'Email',
+                  border: const OutlineInputBorder(),
+                  hintText: isStudent ? 'Enter roll number' : 'Enter email',
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) return 'Enter email';
-                  if (!value.contains('@')) return 'Enter valid email';
+                  if (value == null || value.isEmpty) return isStudent ? 'Enter roll number' : 'Enter email';
+                  if (!isStudent && !value.contains('@')) return 'Enter valid email';
                   return null;
                 },
               ),

@@ -71,11 +71,14 @@ class _AddStudentPageState extends State<AddStudentPage> {
   final _genderController = TextEditingController();
   final _guardianNameController = TextEditingController();
   final _guardianPhoneController = TextEditingController();
-  final _usernameController = TextEditingController(); // used as email
   final _passwordController = TextEditingController();
   final _rollNumberController = TextEditingController();
 
   bool _isLoading = false;
+
+  /// Domain used to construct synthetic auth email for student accounts.
+  /// Change this to something appropriate for your project (doesn't have to be deliverable).
+  static const String _studentEmailDomain = 'students.mygate';
 
   // --- Image picking & compression ---
   Future<void> _pickImage() async {
@@ -193,9 +196,13 @@ class _AddStudentPageState extends State<AddStudentPage> {
     final gender = _genderController.text.trim();
     final guardianName = _guardianNameController.text.trim();
     final guardianPhone = _guardianPhoneController.text.trim();
-    final email = _usernameController.text.trim();
     final password = _passwordController.text;
     final rollNumber = _rollNumberController.text.trim();
+
+    if (rollNumber.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Roll number is required')));
+      return;
+    }
 
     setState(() => _isLoading = true);
 
@@ -203,9 +210,12 @@ class _AddStudentPageState extends State<AddStudentPage> {
     String? imageUrl;
 
     try {
-      // 1) Create Firebase Auth user using provided email & password
+      // Prepare synthetic email from roll number for Firebase Auth
+      final authEmail = '${rollNumber.toLowerCase()}@$_studentEmailDomain';
+
+      // 1) Create Firebase Auth user using synthetic email & password
       createdUserCred = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(email: email, password: password);
+          .createUserWithEmailAndPassword(email: authEmail, password: password);
 
       final uid = createdUserCred.user?.uid;
       if (uid == null) {
@@ -216,8 +226,6 @@ class _AddStudentPageState extends State<AddStudentPage> {
       try {
         imageUrl = await _uploadImage(file: _profileImageFile, bytes: _profileImageBytes);
       } catch (e) {
-        // If image upload fails, we still want to avoid leaving orphan auth user without data.
-        // We'll delete the created auth user and rethrow to let admin retry.
         debugPrint('Image upload failed after creating user: $e');
         // Attempt cleanup
         try {
@@ -239,7 +247,9 @@ class _AddStudentPageState extends State<AddStudentPage> {
         'gender': gender,
         'guardianName': guardianName,
         'guardianPhNo': guardianPhone,
-        'username': email, // keep for reference
+        // username is roll number now
+        'username': rollNumber,
+        'authEmail': authEmail, // store synthetic email for reference
         'rollNumber': rollNumber,
         'profileImageUrl': imageUrl ?? '',
         'createdAt': FieldValue.serverTimestamp(),
@@ -251,9 +261,9 @@ class _AddStudentPageState extends State<AddStudentPage> {
 
       // Optional: you may also create a 'users' doc to store role etc.
       final usersCol = FirebaseFirestore.instance.collection('users');
-      await usersCol.doc(uid).set({
+      await usersCol.doc(rollNumber).set({
         'role': 'student',
-        'email': email,
+        
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -268,9 +278,9 @@ class _AddStudentPageState extends State<AddStudentPage> {
       // Common auth errors
       String message = 'Auth error: ${e.code}';
       if (e.code == 'email-already-in-use') {
-        message = 'This email is already in use.';
+        message = 'This roll number appears to be already used (auth email collision).';
       } else if (e.code == 'invalid-email') {
-        message = 'Invalid email address.';
+        message = 'Invalid synthetic email generated from roll number.';
       } else if (e.code == 'weak-password') {
         message = 'Password is too weak.';
       }
@@ -318,7 +328,6 @@ class _AddStudentPageState extends State<AddStudentPage> {
     _genderController.clear();
     _guardianNameController.clear();
     _guardianPhoneController.clear();
-    _usernameController.clear();
     _passwordController.clear();
     _rollNumberController.clear();
     setState(() {
@@ -338,7 +347,6 @@ class _AddStudentPageState extends State<AddStudentPage> {
     _genderController.dispose();
     _guardianNameController.dispose();
     _guardianPhoneController.dispose();
-    _usernameController.dispose();
     _passwordController.dispose();
     _rollNumberController.dispose();
     super.dispose();
@@ -395,8 +403,7 @@ class _AddStudentPageState extends State<AddStudentPage> {
             _buildTextField(_genderController, 'Gender'),
             _buildTextField(_guardianNameController, "Guardian's Name"),
             _buildTextField(_guardianPhoneController, "Guardian's Phone", keyboardType: TextInputType.phone),
-            // username is used as email for auth
-            _buildTextField(_usernameController, 'Email (used as username)', keyboardType: TextInputType.emailAddress),
+            // Removed visible email field — using roll number as username
             _buildTextField(_passwordController, 'Password', obscureText: true),
             const SizedBox(height: 18),
             SizedBox(

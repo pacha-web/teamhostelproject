@@ -24,7 +24,7 @@ class SplashScreen extends StatelessWidget {
                 // Navigate to the ViewHistoryPage
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => ViewHistoryPage()),
+                  MaterialPageRoute(builder: (context) => ViewHistoryScreen()),
                 );
               }
             },
