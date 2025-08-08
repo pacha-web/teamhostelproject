@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 
 class QRScannerPage extends StatefulWidget {
   const QRScannerPage({super.key});
@@ -17,248 +18,181 @@ class _QRScannerPageState extends State<QRScannerPage> {
   String scannedData = 'Scan a QR code to get data';
   bool isScanning = true;
   bool isLoading = false;
-
+  
   Map<String, dynamic>? _scannedStudent;
 
-  Future<void> _processBarcode(String data) async {
-    setState(() {
-      scannedData = data;
-      isScanning = false;
-      isLoading = true;
-      _scannedStudent = null;
-    });
-
-    Map<String, dynamic>? parsedJson;
-    try {
-      final decoded = jsonDecode(data);
-      if (decoded is Map<String, dynamic>) {
-        parsedJson = decoded;
-      } else if (decoded is Map) {
-        parsedJson = Map<String, dynamic>.from(decoded);
-      }
-    } catch (_) {
-      parsedJson = null;
-    }
-
-    try {
-      final studentsCol = FirebaseFirestore.instance.collection('students');
-
-      if (parsedJson != null) {
-        final candidateRoll = (parsedJson['rollNumber'] ??
-                parsedJson['roll'] ??
-                parsedJson['username'] ??
-                parsedJson['studentRoll'] ??
-                '')
-            .toString()
-            .trim();
-        final candidateUid = (parsedJson['uid'] ?? parsedJson['studentUid'] ?? '').toString().trim();
-
-        if (candidateRoll.isNotEmpty) {
-          final byRoll = await studentsCol.where('rollNumber', isEqualTo: candidateRoll).limit(1).get();
-          if (byRoll.docs.isNotEmpty) {
-            final d = byRoll.docs.first;
-            _scannedStudent = {...?d.data(), 'studentDocId': d.id};
-          }
-        }
-
-        if (_scannedStudent == null && candidateUid.isNotEmpty) {
-          final byUid = await studentsCol.where('uid', isEqualTo: candidateUid).limit(1).get();
-          if (byUid.docs.isNotEmpty) {
-            final d = byUid.docs.first;
-            _scannedStudent = {...?d.data(), 'studentDocId': d.id};
-          }
-        }
-
-        if (_scannedStudent == null && parsedJson.isNotEmpty) {
-          _scannedStudent = {
-            'name': parsedJson['studentName'] ?? parsedJson['name'] ?? '',
-            'roll': parsedJson['rollNumber'] ?? parsedJson['roll'] ?? parsedJson['username'] ?? '',
-            'department': parsedJson['department'] ?? parsedJson['dept'] ?? '',
-            'extraFromQr': parsedJson,
-          };
-        }
-      } else {
-        final docSnap = await studentsCol.doc(data).get();
-        if (docSnap.exists) {
-          _scannedStudent = {...?docSnap.data(), 'studentDocId': docSnap.id};
-        } else {
-          var q = await studentsCol.where('uid', isEqualTo: data).limit(1).get();
-          if (q.docs.isNotEmpty) {
-            final d = q.docs.first;
-            _scannedStudent = {...?d.data(), 'studentDocId': d.id};
-          } else {
-            q = await studentsCol.where('rollNumber', isEqualTo: data).limit(1).get();
-            if (q.docs.isNotEmpty) {
-              final d = q.docs.first;
-              _scannedStudent = {...?d.data(), 'studentDocId': d.id};
-            } else {
-              q = await studentsCol.where('roll', isEqualTo: data).limit(1).get();
-              if (q.docs.isNotEmpty) {
-                final d = q.docs.first;
-                _scannedStudent = {...?d.data(), 'studentDocId': d.id};
-              } else {
-                q = await studentsCol.where('email', isEqualTo: data).limit(1).get();
-                if (q.docs.isNotEmpty) {
-                  final d = q.docs.first;
-                  _scannedStudent = {...?d.data(), 'studentDocId': d.id};
-                }
-              }
-            }
-          }
-        }
-      }
-
-      if (!mounted) return;
-
-      if (parsedJson != null) {
-        await _showJsonDialog(parsedJson, data);
-      } else {
-        if (_scannedStudent != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Student found: ${_scannedStudent!['name'] ?? 'Unknown'}')),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Student record not found — saving raw scanned data.')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lookup failed: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
-  }
-
-  Future<void> _showJsonDialog(Map<String, dynamic> jsonMap, String rawData) async {
-    final name = (jsonMap['studentName'] ?? jsonMap['name'] ?? '').toString();
-    final roll = (jsonMap['rollNumber'] ?? jsonMap['roll'] ?? jsonMap['username'] ?? '').toString();
-    final department = (jsonMap['department'] ?? jsonMap['dept'] ?? '').toString();
-    final reason = (jsonMap['reason'] ?? '').toString();
-    final departure = (jsonMap['departureTime'] ?? '').toString();
-    final ret = (jsonMap['returnTime'] ?? '').toString();
-    final status = (jsonMap['status'] ?? '').toString();
-    final passId = (jsonMap['passId'] ?? '').toString();
-    final createdAt = (jsonMap['createdAt'] ?? '').toString();
-
-    await showDialog<void>(
+  Future<void> _showInvalidPassDialog(String message) async {
+    await showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Gatepass QR Data'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _labelValueRow('Name', name),
-                _labelValueRow('Roll No.', roll),
-                _labelValueRow('Department', department),
-                if (reason.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  const Text('Reason', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text(reason),
-                ],
-                if (departure.isNotEmpty) _labelValueRow('Departure', departure),
-                if (ret.isNotEmpty) _labelValueRow('Return', ret),
-                if (status.isNotEmpty) _labelValueRow('Status', status),
-                if (passId.isNotEmpty) _labelValueRow('Pass ID', passId),
-                if (createdAt.isNotEmpty) _labelValueRow('Created At', createdAt),
-              ],
-            ),
+      builder: (context) => AlertDialog(
+        title: const Text('Invalid Gatepass'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _resetScan();
+            },
+            child: const Text('OK'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _labelValueRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('$label: ', style: const TextStyle(fontWeight: FontWeight.bold)),
-          Expanded(child: Text(value.isNotEmpty ? value : '-')),
         ],
       ),
     );
   }
 
-  Future<void> _handleStatus(String status) async {
-    if (scannedData == 'Scan a QR code to get data') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please scan a QR code first')),
-      );
-      return;
+  Future<void> _processBarcode(String data) async {
+    if (!isScanning || isLoading) return;
+
+    setState(() {
+      isLoading = true;
+      isScanning = false;
+    });
+
+    try {
+      final Map<String, dynamic> parsedJson = jsonDecode(data);
+      final roll = parsedJson['roll'] ?? parsedJson['rollNumber'];
+      final departureStr = parsedJson['departureTime'];
+      final returnStr = parsedJson['returnTime'];
+      final passId = parsedJson['passId'];
+
+      if (roll == null || departureStr == null || returnStr == null || passId == null) {
+        throw const FormatException("Missing required fields in QR code data.");
+      }
+
+      final departureTime = DateTime.parse(departureStr).toLocal();
+      final returnTime = DateTime.parse(returnStr).toLocal();
+      final now = DateTime.now();
+
+      if (now.isBefore(departureTime)) {
+        await _showInvalidPassDialog("⏳ Gatepass not yet valid.\nValid from: ${DateFormat('dd-MM-yyyy hh:mm a').format(departureTime)}");
+        _resetScan();
+        return;
+      }
+      
+      if (now.isAfter(returnTime)) {
+        await _showInvalidPassDialog("⛔ Gatepass has expired.\nValid until: ${DateFormat('dd-MM-yyyy hh:mm a').format(returnTime)}");
+        _resetScan();
+        return;
+      }
+
+      final requestDocRef = FirebaseFirestore.instance.collection('gatepass_requests').doc(passId);
+      final requestDocSnapshot = await requestDocRef.get();
+
+      if (!requestDocSnapshot.exists) {
+        await _showInvalidPassDialog("❌ Gatepass not found in system.");
+        _resetScan();
+        return;
+      }
+
+      final currentStatus = (requestDocSnapshot.data()?['status'] ?? '').toString().toLowerCase();
+      
+      // Allow 'approved' and 'out' statuses for scanning
+      if (currentStatus != 'approved' && currentStatus != 'out') {
+        await _showInvalidPassDialog("❌ Gatepass has already been used or is invalid.\nStatus: ${currentStatus.toUpperCase()}");
+        _resetScan();
+        return;
+      }
+      
+      if (mounted) {
+        setState(() {
+          _scannedStudent = parsedJson;
+          _scannedStudent!['currentStatus'] = currentStatus;
+          scannedData = 'Gatepass for ${parsedJson['studentName'] ?? parsedJson['name']} is valid.';
+        });
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error processing QR code: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      _resetScan();
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
+  }
+
+  Future<void> _handleStatus(String action) async {
+    if (_scannedStudent == null || isLoading) return;
 
     setState(() => isLoading = true);
 
     try {
-      final securityUser = FirebaseAuth.instance.currentUser;
+      final passId = _scannedStudent!['passId'];
+      final requestDocRef = FirebaseFirestore.instance.collection('gatepass_requests').doc(passId);
+      final requestDocSnapshot = await requestDocRef.get();
 
-      final Map<String, dynamic> docData = {
-        'scannedData': scannedData,
-        'status': status,
-        'timestamp': FieldValue.serverTimestamp(),
-        'scannedBy': securityUser?.uid ?? 'unknown',
-      };
+      if (!requestDocSnapshot.exists) {
+        throw Exception("Request document not found.");
+      }
+      
+      // Get the full student data from the original request
+      final requestData = requestDocSnapshot.data()!;
+      final currentStatus = (requestData['status'] ?? '').toString().toLowerCase();
+      String newStatus;
 
-      if (_scannedStudent != null) {
-        docData['studentName'] = (_scannedStudent!['name'] ?? '').toString();
-        docData['roll'] = (_scannedStudent!['roll'] ?? _scannedStudent!['rollNumber'] ?? '').toString();
-        docData['department'] = (_scannedStudent!['department'] ?? _scannedStudent!['dept'] ?? '').toString();
-        docData['studentDocId'] = (_scannedStudent!['studentDocId'] ?? '').toString();
-        if (_scannedStudent!.containsKey('uid')) {
-          docData['uid'] = (_scannedStudent!['uid'] ?? '').toString();
-        }
+      if (action == 'Out' && currentStatus == 'approved') {
+        newStatus = 'Out';
+        
+        // Update the live gatepass_requests status and outTime
+        await requestDocRef.update({'status': newStatus, 'outTime': FieldValue.serverTimestamp()});
+        
+        // Corrected: Create a new history document for the "Out" scan in 'gatepasses'
+        await FirebaseFirestore.instance.collection('gatepasses').add({
+          // Copy all data from the original request for a complete record
+          ...requestData,
+          'status': newStatus,
+          'passRequestId': passId, // Use the original request ID
+          'outTime': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(), // Crucial for sorting
+        });
+      } else if (action == 'In' && currentStatus == 'out') {
+        newStatus = 'In';
+        
+        // Update the live gatepass_requests status and inTime
+        await requestDocRef.update({'status': newStatus, 'inTime': FieldValue.serverTimestamp()});
+
+        // Corrected: Create a new history document for the "In" scan in 'gatepasses'
+        await FirebaseFirestore.instance.collection('gatepasses').add({
+          // Copy all data from the original request for a complete record
+          ...requestData,
+          'status': newStatus,
+          'passRequestId': passId, // Use the original request ID
+          'inTime': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(), // Crucial for sorting
+        });
       } else {
-        docData['studentName'] = scannedData;
-        docData['roll'] = '';
-        docData['department'] = '';
-        docData['studentDocId'] = '';
-        docData['uid'] = securityUser?.uid ?? 'unknown';
+        await _showInvalidPassDialog("Invalid action for current status: $currentStatus");
+        _resetScan();
+        return;
       }
-
-      final globalRef = await FirebaseFirestore.instance.collection('gatepasses').add(docData);
-
-      if (_scannedStudent != null && _scannedStudent!['studentDocId'] != null) {
-        final studentDocId = _scannedStudent!['studentDocId'];
-        final nestedRef = FirebaseFirestore.instance
-            .collection('students')
-            .doc(studentDocId)
-            .collection('gatepasses')
-            .doc(globalRef.id);
-        await nestedRef.set(docData);
-      }
-
+      
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Marked as $status')),
+        SnackBar(content: Text("✅ Marked as ${newStatus.toLowerCase()}")),
       );
 
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) {
-          setState(() {
-            scannedData = 'Scan a QR code to get data';
-            isScanning = true;
-            _scannedStudent = null;
-          });
-        }
-      });
+      await Future.delayed(const Duration(seconds: 2));
+      _resetScan();
+
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating status: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      _resetScan();
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -289,6 +223,18 @@ class _QRScannerPageState extends State<QRScannerPage> {
       await FirebaseAuth.instance.signOut();
       context.go('/signin');
     }
+  }
+
+  Widget _statusButton(String label, Color color) {
+    return ElevatedButton(
+      onPressed: () => _handleStatus(label),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 18, color: Colors.white)),
+    );
   }
 
   @override
@@ -331,30 +277,33 @@ class _QRScannerPageState extends State<QRScannerPage> {
                     children: [
                       Text(
                         _scannedStudent != null
-                            ? (_scannedStudent!['name'] ?? scannedData).toString()
+                            ? 'Gatepass for ${_scannedStudent!['studentName'] ?? _scannedStudent!['name'] ?? 'N/A'}'
                             : scannedData,
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 18, color: Colors.blueGrey[900]),
                       ),
                       const SizedBox(height: 8),
-                      if (_scannedStudent != null)
+                      if (_scannedStudent != null) ...[
                         Text(
-                          'Roll: ${_scannedStudent!['roll'] ?? _scannedStudent!['rollNumber'] ?? 'N/A'}   Dept: ${_scannedStudent!['department'] ?? _scannedStudent!['dept'] ?? 'N/A'}',
+                          'Roll: ${_scannedStudent!['roll'] ?? _scannedStudent!['rollNumber'] ?? 'N/A'}  Dept: ${_scannedStudent!['department'] ?? _scannedStudent!['dept'] ?? 'N/A'}',
                           style: TextStyle(color: Colors.blueGrey[700]),
                         ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _statusButton('In', Colors.green),
-                          _statusButton('Out', Colors.red),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
+                        const SizedBox(height: 20),
+                      ],
+                      if (_scannedStudent != null) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _statusButton('In', Colors.green),
+                            _statusButton('Out', Colors.red),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       TextButton(
                         onPressed: _resetScan,
                         child: const Text('Scan Another QR'),
-                      ),
+                      )
                     ],
                   ),
                 ),
@@ -368,18 +317,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
             ),
         ],
       ),
-    );
-  }
-
-  Widget _statusButton(String label, Color color) {
-    return ElevatedButton(
-      onPressed: () => _handleStatus(label),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-      child: Text(label, style: const TextStyle(fontSize: 18, color: Colors.white)),
     );
   }
 }

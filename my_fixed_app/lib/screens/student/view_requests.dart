@@ -1,10 +1,10 @@
-// my_gatepass.dart
+// my_gate_pass.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:flutter/services.dart'; // Clipboard
+import 'package:intl/intl.dart';
 
 class MyGatePass extends StatelessWidget {
   const MyGatePass({super.key});
@@ -21,35 +21,24 @@ class MyGatePass extends StatelessWidget {
     );
   }
 
-  /// Build JSON payload that will be encoded into the QR code.
-  Map<String, dynamic> _buildQrPayload(Map<String, dynamic> data, String passId, String status) {
+  Map<String, dynamic> _buildQrPayload(Map<String, dynamic> data, String passId) {
     final studentName = (data['studentName'] ?? '').toString();
     final rollNumber = (data['rollNumber'] ?? data['roll'] ?? data['username'] ?? '').toString();
     final department = (data['department'] ?? data['dept'] ?? '').toString();
-    final reason = (data['reason'] ?? '').toString();
     final departure = (data['departureTime'] ?? '').toString();
     final ret = (data['returnTime'] ?? '').toString();
-    final createdAtRaw = data['createdAt'];
-
-    String createdAtIso = '';
-    if (createdAtRaw != null) {
-      if (createdAtRaw is Timestamp) {
-        createdAtIso = (createdAtRaw as Timestamp).toDate().toUtc().toIso8601String();
-      } else {
-        createdAtIso = createdAtRaw.toString();
-      }
-    }
+    final studentDocId = (data['studentDocId'] ?? '').toString();
+    final uid = (data['uid'] ?? '').toString();
 
     return {
-      'passId': passId,
+      'passId': passId, 
       'studentName': studentName,
       'rollNumber': rollNumber,
       'department': department,
-      'reason': reason,
       'departureTime': departure,
       'returnTime': ret,
-      'status': status,
-      'createdAt': createdAtIso,
+      'studentDocId': studentDocId,
+      'uid': uid,
     };
   }
 
@@ -62,6 +51,7 @@ class MyGatePass extends StatelessWidget {
         body: const Center(child: Text('Not signed in')),
       );
     }
+
     final uid = user.uid;
 
     return Scaffold(
@@ -87,9 +77,13 @@ class MyGatePass extends StatelessWidget {
 
           final passDoc = snapshot.data!.docs.first;
           final data = passDoc.data() as Map<String, dynamic>;
-
-          // Safely extract fields with fallbacks
           final status = (data['status'] ?? 'Pending').toString();
+          final statusLower = status.toLowerCase();
+
+          final returnTimeStr = data['returnTime'] as String? ?? '2000-01-01T00:00:00.000';
+          final isExpired = DateTime.now().isAfter(DateTime.parse(returnTimeStr));
+          final isUsed = (statusLower == 'in' || statusLower == 'returned');
+
           final studentName = (data['studentName'] ?? '').toString();
           final rollNumber = (data['rollNumber'] ?? data['roll'] ?? data['username'] ?? '').toString();
           final department = (data['department'] ?? data['dept'] ?? '').toString();
@@ -98,11 +92,9 @@ class MyGatePass extends StatelessWidget {
           final ret = (data['returnTime'] ?? '').toString();
           final createdAt = data['createdAt'];
 
-          // Build JSON payload and encode to string for QR
-          final payloadMap = _buildQrPayload(data, passDoc.id, status);
+          final payloadMap = _buildQrPayload(data, passDoc.id);
           final qrData = jsonEncode(payloadMap);
-
-          // Info card
+          
           final infoCard = Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -128,7 +120,7 @@ class MyGatePass extends StatelessWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 8.0),
                       child: Text(
-                        'Requested: ${createdAt is Timestamp ? (createdAt as Timestamp).toDate().toString() : createdAt.toString()}',
+                        'Requested: ${createdAt is Timestamp ? DateFormat('dd-MM-yyyy hh:mm a').format(createdAt.toDate()) : createdAt.toString()}',
                         style: TextStyle(color: Colors.grey[600], fontSize: 12),
                       ),
                     ),
@@ -137,92 +129,97 @@ class MyGatePass extends StatelessWidget {
             ),
           );
 
-          // Common action buttons (copy JSON)
-          final actionsRow = Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Row(
+          return SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-
-                const SizedBox(width: 12),
-                // Optional: share button (requires share_plus). See comment below.
-                /*Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.share),
-                    label: const Text('Share QR'),
-                    onPressed: () { 
-                      // If you want to share the QR image, generate image bytes via QrPainter
-                      // and use the share_plus package to share the image file.
-                      // See commented example at the end of this file.
-                    },
+                infoCard,
+                if (statusLower == 'approved' && !isExpired)
+                  _buildStatusWidget(
+                    icon: Icons.check_circle,
+                    color: Colors.green,
+                    message: "Your Gate Pass is Approved!",
+                    subMessage: "Status: Valid until ${ret.substring(0, 16).replaceAll('T', ' ')}",
+                    qrData: qrData,
+                    showQr: true,
+                  )
+                else if (statusLower == 'out' && !isExpired)
+                  _buildStatusWidget(
+                    icon: Icons.check_circle_outline,
+                    color: Colors.green,
+                    message: "You are currently Out of Campus.",
+                    subMessage: "Please return before ${ret.substring(0, 16).replaceAll('T', ' ')}",
+                    qrData: qrData,
+                    showQr: true,
+                  )
+                else if (isUsed || isExpired)
+                  _buildStatusWidget(
+                    icon: Icons.lock,
+                    color: Colors.grey,
+                    message: isExpired ? "Your Gate Pass has Expired." : "Your Gate Pass has been Used.",
+                    subMessage: isUsed ? "Status: ${status}" : "",
+                    showQr: false,
+                  )
+                else if (statusLower == 'rejected')
+                  _buildStatusWidget(
+                    icon: Icons.cancel,
+                    color: Colors.red,
+                    message: "Your Gate Pass is Rejected.",
+                    subMessage: reason.isNotEmpty ? 'Reason: $reason' : '',
+                    showQr: false,
+                  )
+                else
+                  _buildStatusWidget(
+                    icon: Icons.hourglass_top,
+                    color: Colors.orange,
+                    message: "Your request is still pending.",
+                    subMessage: "Status: ${status}",
+                    showQr: false,
                   ),
-                ),*/
               ],
             ),
           );
-
-          // Show different UI depending on status
-          final statusLower = status.toLowerCase();
-          if (statusLower == 'approved') {
-            return SingleChildScrollView(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  infoCard,
-                  const SizedBox(height: 8),
-                  const Text("Your Gate Pass is Approved!",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 20),
-                  // QR encoding full JSON payload
-                  QrImageView(
-                    data: qrData,
-                    version: QrVersions.auto,
-                    size: 240.0,
-                    gapless: true,
-                  ),
-                  
-                ],
-              ),
-            );
-          } else if (statusLower == 'rejected') {
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                infoCard,
-                const SizedBox(height: 8),
-                const Icon(Icons.cancel, color: Colors.red, size: 44),
-                const SizedBox(height: 8),
-                const Text("Your Gate Pass is Rejected.",
-                    style: TextStyle(fontSize: 18, color: Colors.red)),
-                const SizedBox(height: 8),
-                if (reason.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Text('Reason: $reason', textAlign: TextAlign.center),
-                  ),
-                const SizedBox(height: 16),
-                actionsRow,
-              ],
-            );
-          } else {
-            // Pending or other statuses
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                infoCard,
-                const SizedBox(height: 8),
-                const Icon(Icons.hourglass_top, color: Colors.orange, size: 44),
-                const SizedBox(height: 8),
-                const Text("Your request is still pending.",
-                    style: TextStyle(fontSize: 18, color: Colors.orange)),
-                const SizedBox(height: 8),
-                Text("Status: ${status.isNotEmpty ? status : 'Pending'}", style: TextStyle(color: Colors.grey[700])),
-                const SizedBox(height: 16),
-                actionsRow,
-              ],
-            );
-          }
         },
       ),
+    );
+  }
+
+  Widget _buildStatusWidget({
+    required IconData icon,
+    required Color color,
+    required String message,
+    String subMessage = '',
+    String qrData = '',
+    bool showQr = false,
+  }) {
+    return Column(
+      children: [
+        const SizedBox(height: 8),
+        Text(message, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+        const SizedBox(height: 8),
+        Icon(icon, color: color, size: 44),
+        const SizedBox(height: 8),
+        if (subMessage.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Text(subMessage, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[700])),
+          ),
+        if (showQr) ...[
+          const SizedBox(height: 20),
+          QrImageView(
+            data: qrData,
+            version: QrVersions.auto,
+            size: 240.0,
+            gapless: true,
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            "Scan this QR at the gate to go out or return.",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.grey),
+          ),
+        ],
+      ],
     );
   }
 }
