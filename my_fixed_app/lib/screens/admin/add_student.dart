@@ -11,12 +11,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:intl/intl.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (kIsWeb) {
-    // Replace with your Firebase Web config
     await Firebase.initializeApp(
       options: const FirebaseOptions(
         apiKey: 'YOUR_API_KEY',
@@ -40,7 +40,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Add Student (Create Auth + Firestore)',
-      theme: ThemeData(primarySwatch: Colors.indigo),
+      theme: ThemeData(primarySwatch: Colors.blue),
       home: const AddStudentPage(),
     );
   }
@@ -54,33 +54,30 @@ class AddStudentPage extends StatefulWidget {
 }
 
 class _AddStudentPageState extends State<AddStudentPage> {
-  // Image state
-  File? _profileImageFile; // mobile-only
-  Uint8List? _profileImageBytes; // web-only
+  File? _profileImageFile;
+  Uint8List? _profileImageBytes;
   XFile? _pickedXFile;
 
   final ImagePicker _picker = ImagePicker();
 
-  // Form controllers
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _dobController = TextEditingController();
   final _departmentController = TextEditingController();
   final _addressController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _genderController = TextEditingController();
+  String? _selectedGender;
   final _guardianNameController = TextEditingController();
   final _guardianPhoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _rollNumberController = TextEditingController();
 
   bool _isLoading = false;
+  bool _isPasswordVisible = false;
 
-  /// Domain used to construct synthetic auth email for student accounts.
-  /// Change this to something appropriate for your project (doesn't have to be deliverable).
   static const String _studentEmailDomain = 'students.mygate';
 
-  // --- Image picking & compression ---
+  // Pick Image
   Future<void> _pickImage() async {
     try {
       final picked = await _picker.pickImage(source: ImageSource.gallery);
@@ -130,7 +127,7 @@ class _AddStudentPageState extends State<AddStudentPage> {
     }
   }
 
-  // --- Upload image to Firebase Storage (returns download URL or null) ---
+  // Upload Image
   Future<String?> _uploadImage({File? file, Uint8List? bytes}) async {
     if (file == null && bytes == null) return null;
 
@@ -152,10 +149,6 @@ class _AddStudentPageState extends State<AddStudentPage> {
         );
         if (snapshot.state == TaskState.success) {
           return await ref.getDownloadURL();
-        } else {
-          throw FirebaseException(
-              plugin: 'firebase_storage',
-              message: 'Upload failed: ${snapshot.state}');
         }
       } else {
         final metadata = SettableMetadata(contentType: 'image/jpeg');
@@ -169,22 +162,15 @@ class _AddStudentPageState extends State<AddStudentPage> {
         );
         if (snapshot.state == TaskState.success) {
           return await ref.getDownloadURL();
-        } else {
-          throw FirebaseException(
-              plugin: 'firebase_storage',
-              message: 'Upload failed: ${snapshot.state}');
         }
       }
-    } on TimeoutException {
-      rethrow;
-    } on FirebaseException {
-      rethrow;
     } catch (e) {
       rethrow;
     }
+    return null;
   }
 
-  // --- Main submit: create auth user, upload image, save student doc with uid ---
+  // Submit Form
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -193,16 +179,11 @@ class _AddStudentPageState extends State<AddStudentPage> {
     final department = _departmentController.text.trim();
     final address = _addressController.text.trim();
     final phone = _phoneController.text.trim();
-    final gender = _genderController.text.trim();
+    final gender = _selectedGender ?? '';
     final guardianName = _guardianNameController.text.trim();
     final guardianPhone = _guardianPhoneController.text.trim();
     final password = _passwordController.text;
     final rollNumber = _rollNumberController.text.trim();
-
-    if (rollNumber.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Roll number is required')));
-      return;
-    }
 
     setState(() => _isLoading = true);
 
@@ -210,34 +191,17 @@ class _AddStudentPageState extends State<AddStudentPage> {
     String? imageUrl;
 
     try {
-      // Prepare synthetic email from roll number for Firebase Auth
       final authEmail = '${rollNumber.toLowerCase()}@$_studentEmailDomain';
-
-      // 1) Create Firebase Auth user using synthetic email & password
       createdUserCred = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(email: authEmail, password: password);
 
       final uid = createdUserCred.user?.uid;
-      if (uid == null) {
-        throw Exception('Failed to create user');
-      }
+      if (uid == null) throw Exception('Failed to create user');
 
-      // 2) Upload image (if any)
-      try {
-        imageUrl = await _uploadImage(file: _profileImageFile, bytes: _profileImageBytes);
-      } catch (e) {
-        debugPrint('Image upload failed after creating user: $e');
-        // Attempt cleanup
-        try {
-          await createdUserCred.user!.delete();
-        } catch (deleteErr) {
-          debugPrint('Failed to delete auth user after upload failure: $deleteErr');
-        }
-        rethrow;
-      }
+      imageUrl =
+          await _uploadImage(file: _profileImageFile, bytes: _profileImageBytes);
 
-      // 3) Prepare Firestore data (store uid as doc id)
-      final data = <String, dynamic>{
+      final data = {
         'uid': uid,
         'name': name,
         'dob': dob,
@@ -247,73 +211,32 @@ class _AddStudentPageState extends State<AddStudentPage> {
         'gender': gender,
         'guardianName': guardianName,
         'guardianPhNo': guardianPhone,
-        // username is roll number now
         'username': rollNumber,
-        'authEmail': authEmail, // store synthetic email for reference
+        'authEmail': authEmail,
         'rollNumber': rollNumber,
         'profileImageUrl': imageUrl ?? '',
         'createdAt': FieldValue.serverTimestamp(),
       };
 
-      // 4) Save to Firestore under doc id = uid (so we can query by uid quickly)
-      final studentsCol = FirebaseFirestore.instance.collection('students');
-      await studentsCol.doc(uid).set(data);
+      await FirebaseFirestore.instance.collection('students').doc(uid).set(data);
 
-      // Optional: you may also create a 'users' doc to store role etc.
-      final usersCol = FirebaseFirestore.instance.collection('users');
-      await usersCol.doc(rollNumber).set({
+      await FirebaseFirestore.instance.collection('users').doc(rollNumber).set({
         'role': 'student',
-        
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Success
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Student account created successfully')),
         );
         _clearForm();
       }
-    } on FirebaseAuthException catch (e) {
-      // Common auth errors
-      String message = 'Auth error: ${e.code}';
-      if (e.code == 'email-already-in-use') {
-        message = 'This roll number appears to be already used (auth email collision).';
-      } else if (e.code == 'invalid-email') {
-        message = 'Invalid synthetic email generated from roll number.';
-      } else if (e.code == 'weak-password') {
-        message = 'Password is too weak.';
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-      }
-    } on TimeoutException catch (e) {
-      // handle upload timeout or other timeouts
+    } catch (e) {
       if (createdUserCred != null) {
-        try {
-          await createdUserCred.user!.delete();
-          debugPrint('Deleted auth user after timeout');
-        } catch (delErr) {
-          debugPrint('Failed to delete user after timeout: $delErr');
-        }
+        await createdUserCred.user?.delete();
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Timeout: ${e.message}')));
-      }
-    } catch (e, st) {
-      debugPrint('Unexpected error creating student: $e\n$st');
-      // If we created auth user but failed before finalizing Firestore, attempt cleanup
-      if (createdUserCred != null) {
-        try {
-          await createdUserCred.user!.delete();
-        } catch (delErr) {
-          debugPrint('Failed to delete user during cleanup: $delErr');
-        }
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -325,7 +248,7 @@ class _AddStudentPageState extends State<AddStudentPage> {
     _departmentController.clear();
     _addressController.clear();
     _phoneController.clear();
-    _genderController.clear();
+    _selectedGender = null;
     _guardianNameController.clear();
     _guardianPhoneController.clear();
     _passwordController.clear();
@@ -337,39 +260,39 @@ class _AddStudentPageState extends State<AddStudentPage> {
     });
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _dobController.dispose();
-    _departmentController.dispose();
-    _addressController.dispose();
-    _phoneController.dispose();
-    _genderController.dispose();
-    _guardianNameController.dispose();
-    _guardianPhoneController.dispose();
-    _passwordController.dispose();
-    _rollNumberController.dispose();
-    super.dispose();
-  }
-
-  // UI helpers
+  // Build Input Field
   Widget _buildTextField(TextEditingController controller, String label,
-      {bool obscureText = false, TextInputType? keyboardType}) {
+      {bool obscureText = false,
+      TextInputType? keyboardType,
+      String? Function(String?)? validator,
+      Widget? suffixIcon,
+      bool readOnly = false,
+      VoidCallback? onTap}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: TextFormField(
         controller: controller,
         obscureText: obscureText,
         keyboardType: keyboardType,
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-        validator: (value) {
-          if (value == null || value.trim().isEmpty) return "$label is required.";
-          return null;
-        },
+        readOnly: readOnly,
+        onTap: onTap,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          suffixIcon: suffixIcon,
+        ),
+        validator: validator ??
+            (value) {
+              if (value == null || value.trim().isEmpty) {
+                return "$label is required.";
+              }
+              return null;
+            },
       ),
     );
   }
 
+  // Image Preview
   Widget _imagePreview(double radius) {
     if (kIsWeb) {
       if (_profileImageBytes != null) {
@@ -394,17 +317,85 @@ class _AddStudentPageState extends State<AddStudentPage> {
           child: Column(children: [
             GestureDetector(onTap: _pickImage, child: _imagePreview(50)),
             const SizedBox(height: 16),
+
             _buildTextField(_nameController, 'Name'),
-            _buildTextField(_dobController, 'Date of Birth (YYYY-MM-DD)', keyboardType: TextInputType.datetime),
+
+            // DOB Date Picker
+            _buildTextField(
+              _dobController,
+              'Date of Birth',
+              readOnly: true,
+              onTap: () async {
+                DateTime? picked = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime(2000),
+                  firstDate: DateTime(1970),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null) {
+                  _dobController.text = DateFormat('yyyy-MM-dd').format(picked);
+                }
+              },
+            ),
+
             _buildTextField(_rollNumberController, 'Roll Number'),
             _buildTextField(_departmentController, 'Department'),
             _buildTextField(_addressController, 'Address'),
-            _buildTextField(_phoneController, 'Phone Number', keyboardType: TextInputType.phone),
-            _buildTextField(_genderController, 'Gender'),
+
+            // Phone validation
+            _buildTextField(
+              _phoneController,
+              'Phone Number',
+              keyboardType: TextInputType.phone,
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) return "Phone number is required.";
+                if (!RegExp(r'^\d{10}$').hasMatch(value)) return "Enter a valid 10-digit phone number.";
+                return null;
+              },
+            ),
+
+            // Gender Dropdown
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12.0),
+              child: DropdownButtonFormField<String>(
+                value: _selectedGender,
+                items: ['Male', 'Female', 'Other']
+                    .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                    .toList(),
+                onChanged: (val) => setState(() => _selectedGender = val),
+                decoration: const InputDecoration(
+                  labelText: 'Gender',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null ? 'Please select a gender' : null,
+              ),
+            ),
+
             _buildTextField(_guardianNameController, "Guardian's Name"),
-            _buildTextField(_guardianPhoneController, "Guardian's Phone", keyboardType: TextInputType.phone),
-            // Removed visible email field — using roll number as username
-            _buildTextField(_passwordController, 'Password', obscureText: true),
+            _buildTextField(
+              _guardianPhoneController,
+              "Guardian's Phone",
+              keyboardType: TextInputType.phone,
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) return "Guardian's phone is required.";
+                if (!RegExp(r'^\d{10}$').hasMatch(value)) return "Enter a valid 10-digit phone number.";
+                return null;
+              },
+            ),
+
+            // Password with Eye Icon
+            _buildTextField(
+              _passwordController,
+              'Password',
+              obscureText: !_isPasswordVisible,
+              suffixIcon: IconButton(
+                icon: Icon(_isPasswordVisible ? Icons.visibility : Icons.visibility_off),
+                onPressed: () {
+                  setState(() => _isPasswordVisible = !_isPasswordVisible);
+                },
+              ),
+            ),
+
             const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
@@ -412,7 +403,10 @@ class _AddStudentPageState extends State<AddStudentPage> {
                 onPressed: _isLoading ? null : _submitForm,
                 child: _isLoading
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Padding(padding: EdgeInsets.symmetric(vertical: 12.0), child: Text('Create Student Account')),
+                    : const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12.0),
+                        child: Text('Create Student Account'),
+                      ),
               ),
             ),
           ]),

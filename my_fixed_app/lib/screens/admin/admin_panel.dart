@@ -13,38 +13,72 @@ class AdminPanel extends StatefulWidget {
 class _AdminPanelState extends State<AdminPanel> {
   int totalStudents = 0;
   int outStudents = 0;
+  bool isLoading = true;
+  List<Map<String, dynamic>> outStudentDetails = [];
+  List<Map<String, dynamic>> inStudentDetails = [];
 
   @override
   void initState() {
     super.initState();
-    _loadStats();
+    _loadStatsAndDetails();
   }
 
-  Future<void> _loadStats() async {
-    final studentsSnapshot =
-        await FirebaseFirestore.instance.collection('students').get();
-
-    int outCount = 0;
-
-    for (final student in studentsSnapshot.docs) {
-      final gatepasses = await FirebaseFirestore.instance
-          .collection('students')
-          .doc(student.id)
-          .collection('gatepasses')
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .get();
-
-      if (gatepasses.docs.isNotEmpty) {
-        final lastStatus = gatepasses.docs.first.data()['status'];
-        if (lastStatus == 'Out') outCount++;
-      }
-    }
-
+  Future<void> _loadStatsAndDetails() async {
     setState(() {
-      totalStudents = studentsSnapshot.docs.length;
-      outStudents = outCount;
+      isLoading = true;
     });
+
+    try {
+      final studentsSnapshot =
+          await FirebaseFirestore.instance.collection('students').get();
+
+      int outCount = 0;
+      List<Map<String, dynamic>> outList = [];
+      List<Map<String, dynamic>> inList = [];
+
+      for (final student in studentsSnapshot.docs) {
+        final studentData = student.data();
+
+        final gatepasses = await FirebaseFirestore.instance
+            .collection('students')
+            .doc(student.id)
+            .collection('gatepasses')
+            .orderBy('createdAt', descending: true)
+            .limit(1)
+            .get();
+
+        String lastStatus = 'In'; // default assume in if no gatepass
+        if (gatepasses.docs.isNotEmpty) {
+          lastStatus = gatepasses.docs.first.data()['status'] ?? 'In';
+        }
+
+        final studentDetails = {
+          'name': studentData['name'] ?? 'N/A',
+          'roll': studentData['rollNumber'] ?? 'N/A',
+          'department': studentData['department'] ?? 'N/A',
+        };
+
+        if (lastStatus == 'Out') {
+          outCount++;
+          outList.add(studentDetails);
+        } else {
+          inList.add(studentDetails);
+        }
+      }
+
+      setState(() {
+        totalStudents = studentsSnapshot.docs.length;
+        outStudents = outCount;
+        outStudentDetails = outList;
+        inStudentDetails = inList;
+      });
+    } catch (e) {
+      debugPrint('Error loading stats: $e');
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
+    }
   }
 
   Future<void> _confirmLogout(BuildContext context) async {
@@ -68,35 +102,113 @@ class _AdminPanelState extends State<AdminPanel> {
 
     if (shouldLogout == true) {
       await FirebaseAuth.instance.signOut();
-      context.go('/signin');
+      if (context.mounted) {
+        context.go('/signin');
+      }
     }
   }
 
-  Widget _buildStatBox(String label, int value, Color color) {
-    return Container(
-      width: 160,
-      margin: const EdgeInsets.all(8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(2, 2))
-        ],
+  Widget _buildStatBox(String label, int value, IconData icon, List<Color> colors,
+      {VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 160,
+        margin: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: colors,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(4, 4))
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(icon, size: 36, color: Colors.white),
+            const SizedBox(height: 12),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 16, color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value.toString(),
+              style: const TextStyle(
+                fontSize: 36,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            value.toString(),
-            style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
+    );
+  }
+
+  Widget _buildMenuItem(String title, IconData icon, VoidCallback onTap) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Icon(icon, size: 30, color: Theme.of(context).primaryColor),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios, size: 20),
+            ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: const TextStyle(fontSize: 16, color: Colors.white),
-            textAlign: TextAlign.center,
-          ),
+        ),
+      ),
+    );
+  }
+
+  void _showStudentListDialog(
+      BuildContext context, String title, List<Map<String, dynamic>> students) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: students.isEmpty
+              ? const Text('No students to display.')
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: students.length,
+                  separatorBuilder: (_, __) => const Divider(),
+                  itemBuilder: (context, index) {
+                    final s = students[index];
+                    return ListTile(
+                      leading: CircleAvatar(child: Text(s['name'][0])),
+                      title: Text(s['name']),
+                      subtitle: Text(
+                          'Roll: ${s['roll']}  |  Dept: ${s['department']}'),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close')),
         ],
       ),
     );
@@ -117,45 +229,63 @@ class _AdminPanelState extends State<AdminPanel> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          children: [
-            // Flexible info boxes for all screen sizes
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 16,
-              runSpacing: 16,
-              children: [
-                _buildStatBox("Total Students", totalStudents, Colors.blue),
-                _buildStatBox("Out Students", outStudents, Colors.red),
-                _buildStatBox("Current Strength", currentStrength, Colors.green),
-              ],
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                children: [
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 16,
+                    runSpacing: 16,
+                    children: [
+                      _buildStatBox(
+                        "Total Students",
+                        totalStudents,
+                        Icons.group,
+                        [Colors.blue.shade800, Colors.blue.shade500],
+                      ),
+                      _buildStatBox(
+                        "Out Students",
+                        outStudents,
+                        Icons.exit_to_app,
+                        [Colors.red.shade800, Colors.red.shade500],
+                        onTap: () => _showStudentListDialog(
+                            context, 'Out Students', outStudentDetails),
+                      ),
+                      _buildStatBox(
+                        "Current Strength",
+                        currentStrength,
+                        Icons.home,
+                        [Colors.green.shade800, Colors.green.shade500],
+                        onTap: () => _showStudentListDialog(
+                            context, 'Current Strength', inStudentDetails),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 30),
+                  _buildMenuItem(
+                    "Add Student",
+                    Icons.person_add,
+                    () => context.push('/add-student'),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildMenuItem(
+                    "Student List",
+                    Icons.list,
+                    () => context.go('/student-list'),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildMenuItem(
+                    "Requested Gate Pass",
+                    Icons.assignment,
+                    () => context.push('/requested-gate-pass'),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 30),
-            ElevatedButton.icon(
-              onPressed: () => context.push('/add-student'),
-              icon: const Icon(Icons.person_add),
-              label: const Text("Add Student"),
-              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: () => context.go('/student-list'),
-              icon: const Icon(Icons.list),
-              label: const Text("Student List"),
-              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: () => context.push('/requested-gate-pass'),
-              icon: const Icon(Icons.assignment),
-              label: const Text("Requested Gate Pass"),
-              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
+

@@ -29,12 +29,13 @@ class MyGatePass extends StatelessWidget {
     final ret = (data['returnTime'] ?? '').toString();
     final studentDocId = (data['studentDocId'] ?? '').toString();
     final uid = (data['uid'] ?? '').toString();
-
+    final reason = (data['reason'] ?? '').toString();
     return {
       'passId': passId, 
       'studentName': studentName,
       'rollNumber': rollNumber,
       'department': department,
+      'reason': reason,
       'departureTime': departure,
       'returnTime': ret,
       'studentDocId': studentDocId,

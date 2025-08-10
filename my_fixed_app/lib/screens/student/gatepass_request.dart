@@ -275,7 +275,7 @@ class _GatePassRequestState extends State<GatePassRequest> {
                 child: _isSubmitting
                     ? const SizedBox(
                         height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Submit Request'),
+                    : const Text('Submit Request', style: TextStyle(color: Colors.white)),
               ),
             ],
           ),

@@ -17,7 +17,7 @@ class SplashScreen extends StatelessWidget {
           PopupMenuButton<String>(
             icon: Icon(
               Icons.more_vert, // Three dots icon
-              color: Colors.blue[800], // Customize the color here
+              color: Colors.blue, // Customize the color here
             ),
             onSelected: (String value) {
               if (value == 'View History') {

@@ -42,7 +42,9 @@ class _StudentListPageState extends State<StudentListPage> {
       gender: data['gender'] ?? '',
       guardianName: data['guardianName'] ?? '',
       guardianPhone: data['guardianPhNo'] ?? '',
-      profileImageUrl: (data['profileImageUrl'] is String) ? data['profileImageUrl'] as String : '',
+      profileImageUrl: (data['profileImageUrl'] is String)
+          ? data['profileImageUrl'] as String
+          : '',
     );
   }
 
@@ -69,15 +71,19 @@ class _StudentListPageState extends State<StudentListPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Confirm Delete'),
-        content: const Text('Are you sure you want to delete this student?'),
+        content: const Text('Are you sure you want to delete this student? This action cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
               Navigator.pop(context);
               _deleteStudent(docId);
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -105,6 +111,8 @@ class _StudentListPageState extends State<StudentListPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Student List'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/admin'),
@@ -115,13 +123,18 @@ class _StudentListPageState extends State<StudentListPage> {
           children: [
             // Search field
             Padding(
-              padding: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.all(16.0),
               child: TextField(
                 controller: _searchController,
-                decoration: const InputDecoration(
-                  labelText: 'Search',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.search),
+                decoration: InputDecoration(
+                  labelText: 'Search students...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey[200],
+                  prefixIcon: const Icon(Icons.search),
                 ),
               ),
             ),
@@ -140,7 +153,7 @@ class _StudentListPageState extends State<StudentListPage> {
                   final docs = snapshot.data?.docs ?? [];
                   final students = docs.map(_studentFromDoc).toList();
 
-                  // Client-side filtering (simple)
+                  // Client-side filtering
                   final filtered = students.where(_matchesQuery).toList();
 
                   if (filtered.isEmpty) {
@@ -151,31 +164,17 @@ class _StudentListPageState extends State<StudentListPage> {
                     itemCount: filtered.length,
                     itemBuilder: (context, index) {
                       final student = filtered[index];
-
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        child: ListTile(
-                          leading: (student.profileImageUrl != null && student.profileImageUrl!.isNotEmpty)
-                              ? CircleAvatar(
-                                  backgroundImage: NetworkImage(student.profileImageUrl!),
-                                )
-                              : const CircleAvatar(child: Icon(Icons.person)),
-                          title: Text(student.name),
-                          subtitle: Text('Dept: ${student.department}\nPhone: ${student.phone}'),
-                          isThreeLine: true,
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _confirmDelete(student.id),
-                          ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => StudentDetailPage(student: student),
-                              ),
-                            );
-                          },
-                        ),
+                      return StudentListTile(
+                        student: student,
+                        onDelete: () => _confirmDelete(student.id),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => StudentDetailPage(student: student),
+                            ),
+                          );
+                        },
                       );
                     },
                   );
@@ -184,6 +183,62 @@ class _StudentListPageState extends State<StudentListPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// Student list tile widget to improve code readability
+class StudentListTile extends StatelessWidget {
+  final Student student;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const StudentListTile({
+    super.key,
+    required this.student,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: (student.profileImageUrl != null && student.profileImageUrl!.isNotEmpty)
+            ? CircleAvatar(
+                radius: 30,
+                backgroundImage: NetworkImage(student.profileImageUrl!),
+              )
+            : CircleAvatar(
+                radius: 30,
+                backgroundColor: Colors.indigo.shade100,
+                child: const Icon(Icons.person, color: Colors.blue),
+              ),
+        title: Text(
+          student.name,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Text('Department: ${student.department}'),
+            Text('Phone: ${student.phone}'),
+          ],
+        ),
+        isThreeLine: true,
+        trailing: IconButton(
+          icon: const Icon(Icons.delete, color: Colors.red),
+          onPressed: onDelete,
+        ),
+        onTap: onTap,
       ),
     );
   }
@@ -226,24 +281,36 @@ class StudentDetailPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(student.name),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         child: SingleChildScrollView(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              (student.profileImageUrl != null && student.profileImageUrl!.isNotEmpty)
-                  ? CircleAvatar(radius: 60, backgroundImage: NetworkImage(student.profileImageUrl!))
-                  : const CircleAvatar(radius: 60, child: Icon(Icons.person, size: 60)),
-              const SizedBox(height: 20),
-              _detailRow('Name', student.name),
-              _detailRow('Department', student.department),
-              _detailRow('Phone', student.phone),
-              _detailRow('Address', student.address),
-              _detailRow('Date of Birth', student.dob),
-              _detailRow('Gender', student.gender),
-              _detailRow('Guardian Name', student.guardianName),
-              _detailRow('Guardian Phone', student.guardianPhone),
+              Center(
+                child: (student.profileImageUrl != null && student.profileImageUrl!.isNotEmpty)
+                    ? CircleAvatar(
+                        radius: 80,
+                        backgroundImage: NetworkImage(student.profileImageUrl!),
+                      )
+                    : CircleAvatar(
+                        radius: 80,
+                        backgroundColor: Colors.indigo.shade100,
+                        child: const Icon(Icons.person, size: 80, color: Colors.indigo),
+                      ),
+              ),
+              const SizedBox(height: 32),
+              _detailCard('Name', student.name),
+              _detailCard('Department', student.department),
+              _detailCard('Phone', student.phone),
+              _detailCard('Address', student.address),
+              _detailCard('Date of Birth', student.dob),
+              _detailCard('Gender', student.gender),
+              _detailCard('Guardian Name', student.guardianName),
+              _detailCard('Guardian Phone', student.guardianPhone),
             ],
           ),
         ),
@@ -251,15 +318,35 @@ class StudentDetailPage extends StatelessWidget {
     );
   }
 
-  Widget _detailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('$label: ', style: const TextStyle(fontWeight: FontWeight.bold)),
-          Expanded(child: Text(value)),
-        ],
+  Widget _detailCard(String label, String value) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

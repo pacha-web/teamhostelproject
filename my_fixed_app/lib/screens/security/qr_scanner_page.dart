@@ -18,7 +18,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
   String scannedData = 'Scan a QR code to get data';
   bool isScanning = true;
   bool isLoading = false;
-  
   Map<String, dynamic>? _scannedStudent;
 
   Future<void> _showInvalidPassDialog(String message) async {
@@ -64,19 +63,24 @@ class _QRScannerPageState extends State<QRScannerPage> {
       final now = DateTime.now();
 
       if (now.isBefore(departureTime)) {
-        await _showInvalidPassDialog("⏳ Gatepass not yet valid.\nValid from: ${DateFormat('dd-MM-yyyy hh:mm a').format(departureTime)}");
-        _resetScan();
-        return;
-      }
-      
-      if (now.isAfter(returnTime)) {
-        await _showInvalidPassDialog("⛔ Gatepass has expired.\nValid until: ${DateFormat('dd-MM-yyyy hh:mm a').format(returnTime)}");
+        await _showInvalidPassDialog(
+          "⏳ Gatepass not yet valid.\nValid from: ${DateFormat('dd-MM-yyyy hh:mm a').format(departureTime)}",
+        );
         _resetScan();
         return;
       }
 
-      final requestDocRef = FirebaseFirestore.instance.collection('gatepass_requests').doc(passId);
-      final requestDocSnapshot = await requestDocRef.get();
+      if (now.isAfter(returnTime)) {
+        await _showInvalidPassDialog(
+          "⛔ Gatepass has expired.\nValid until: ${DateFormat('dd-MM-yyyy hh:mm a').format(returnTime)}",
+        );
+        _resetScan();
+        return;
+      }
+
+      // Check if pass exists in gatepass_requests
+      final requestDocSnapshot =
+          await FirebaseFirestore.instance.collection('gatepass_requests').doc(passId).get();
 
       if (!requestDocSnapshot.exists) {
         await _showInvalidPassDialog("❌ Gatepass not found in system.");
@@ -84,23 +88,12 @@ class _QRScannerPageState extends State<QRScannerPage> {
         return;
       }
 
-      final currentStatus = (requestDocSnapshot.data()?['status'] ?? '').toString().toLowerCase();
-      
-      // Allow 'approved' and 'out' statuses for scanning
-      if (currentStatus != 'approved' && currentStatus != 'out') {
-        await _showInvalidPassDialog("❌ Gatepass has already been used or is invalid.\nStatus: ${currentStatus.toUpperCase()}");
-        _resetScan();
-        return;
-      }
-      
       if (mounted) {
         setState(() {
           _scannedStudent = parsedJson;
-          _scannedStudent!['currentStatus'] = currentStatus;
           scannedData = 'Gatepass for ${parsedJson['studentName'] ?? parsedJson['name']} is valid.';
         });
       }
-
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -126,68 +119,78 @@ class _QRScannerPageState extends State<QRScannerPage> {
     setState(() => isLoading = true);
 
     try {
+      final roll = _scannedStudent!['roll'] ?? _scannedStudent!['rollNumber'];
       final passId = _scannedStudent!['passId'];
-      final requestDocRef = FirebaseFirestore.instance.collection('gatepass_requests').doc(passId);
-      final requestDocSnapshot = await requestDocRef.get();
+      final gatepassesCollection = FirebaseFirestore.instance.collection('gatepasses');
 
-      if (!requestDocSnapshot.exists) {
-        throw Exception("Request document not found.");
+      if (roll == null) {
+        throw Exception("Roll number missing in scanned data.");
       }
-      
-      // Get the full student data from the original request
-      final requestData = requestDocSnapshot.data()!;
-      final currentStatus = (requestData['status'] ?? '').toString().toLowerCase();
-      String newStatus;
 
-      if (action == 'Out' && currentStatus == 'approved') {
-        newStatus = 'Out';
-        
-        // Update the live gatepass_requests status and outTime
-        await requestDocRef.update({'status': newStatus, 'outTime': FieldValue.serverTimestamp()});
-        
-        // Corrected: Create a new history document for the "Out" scan in 'gatepasses'
-        await FirebaseFirestore.instance.collection('gatepasses').add({
-          // Copy all data from the original request for a complete record
-          ...requestData,
-          'status': newStatus,
-          'passRequestId': passId, // Use the original request ID
-          'outTime': FieldValue.serverTimestamp(),
-          'createdAt': FieldValue.serverTimestamp(), // Crucial for sorting
+      final now = FieldValue.serverTimestamp(); // Use current server time here
+
+      if (action.toLowerCase() == 'out') {
+        // Check if already out without in
+        final query = await gatepassesCollection
+            .where('rollNumber', isEqualTo: roll)
+            .where('status', isEqualTo: 'Out')
+            .where('inTime', isNull: true)
+            .get();
+
+        if (query.docs.isNotEmpty) {
+          await _showInvalidPassDialog("⚠️ Student is already marked OUT and has not returned yet.");
+          _resetScan();
+          return;
+        }
+
+        // Add new "Out" record with current time as outTime
+        await gatepassesCollection.add({
+          ..._scannedStudent!,
+          'status': 'Out',
+          'outTime': now,
+          'inTime': null,
+          'passRequestId': passId,
+          'createdAt': now,
+          'reason': _scannedStudent!['reason'] ?? '',
         });
-      } else if (action == 'In' && currentStatus == 'out') {
-        newStatus = 'In';
-        
-        // Update the live gatepass_requests status and inTime
-        await requestDocRef.update({'status': newStatus, 'inTime': FieldValue.serverTimestamp()});
+      } else if (action.toLowerCase() == 'in') {
+        // Find last "Out" record with no inTime
+        final query = await gatepassesCollection
+            .where('rollNumber', isEqualTo: roll)
+            .where('status', isEqualTo: 'Out')
+            .where('inTime', isNull: true)
+            .orderBy('outTime', descending: true)
+            .limit(1)
+            .get();
 
-        // Corrected: Create a new history document for the "In" scan in 'gatepasses'
-        await FirebaseFirestore.instance.collection('gatepasses').add({
-          // Copy all data from the original request for a complete record
-          ...requestData,
-          'status': newStatus,
-          'passRequestId': passId, // Use the original request ID
-          'inTime': FieldValue.serverTimestamp(),
-          'createdAt': FieldValue.serverTimestamp(), // Crucial for sorting
+        if (query.docs.isEmpty) {
+          await _showInvalidPassDialog("⚠️ No OUT record found. Please scan OUT before scanning IN.");
+          _resetScan();
+          return;
+        }
+
+        final docRef = query.docs.first.reference;
+
+        await docRef.update({
+          'inTime': now,
+          'status': 'In',
         });
       } else {
-        await _showInvalidPassDialog("Invalid action for current status: $currentStatus");
-        _resetScan();
-        return;
+        throw Exception('Invalid action: $action');
       }
-      
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("✅ Marked as ${newStatus.toLowerCase()}")),
+        SnackBar(content: Text("✅ Marked as ${action.toLowerCase()}")),
       );
 
       await Future.delayed(const Duration(seconds: 2));
       _resetScan();
-
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error updating status: $e'),
+            content: Text('Error saving to gatepasses: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -258,8 +261,8 @@ class _QRScannerPageState extends State<QRScannerPage> {
                 flex: 4,
                 child: MobileScanner(
                   controller: MobileScannerController(detectionSpeed: DetectionSpeed.noDuplicates),
-                  onDetect: (BarcodeCapture capture) {
-                    final data = capture.barcodes.firstOrNull?.rawValue;
+                  onDetect: (barcodeCapture) {
+                    final data = barcodeCapture.barcodes.firstOrNull?.rawValue;
                     if (data != null && isScanning) {
                       _processBarcode(data);
                     }
@@ -289,8 +292,6 @@ class _QRScannerPageState extends State<QRScannerPage> {
                           style: TextStyle(color: Colors.blueGrey[700]),
                         ),
                         const SizedBox(height: 20),
-                      ],
-                      if (_scannedStudent != null) ...[
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [

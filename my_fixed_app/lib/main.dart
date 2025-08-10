@@ -45,7 +45,7 @@ class HostelApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color.fromARGB(255, 26, 26, 155),
+          backgroundColor: Colors.blue,
           foregroundColor: Colors.white,
         ),
       ),

@@ -1,11 +1,6 @@
-
-// view_history_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'dart:convert';
-
-enum HistoryType { current, old }
 
 class ViewHistoryScreen extends StatelessWidget {
   const ViewHistoryScreen({super.key});
@@ -14,158 +9,146 @@ class ViewHistoryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('View History'), backgroundColor: appBlue),
-      body: FutureBuilder<QuerySnapshot>(
-        future: FirebaseFirestore.instance.collection('students').get(),
+      appBar: AppBar(
+        title: const Text('View History'),
+        backgroundColor: appBlue,
+      ),
+      body: FutureBuilder<Map<String, List<Map<String, dynamic>>>>(
+        future: _fetchGatepassesGroupedByDate(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) return const Center(child: Text('Error loading students.'));
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return const Center(child: Text('Error loading gatepasses.'));
+          }
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text('No gatepass history available.'));
+          }
 
-          final students = snapshot.data!.docs;
+          final groupedByDate = snapshot.data!;
+          final sortedDates = groupedByDate.keys.toList()
+            ..sort((a, b) => b.compareTo(a)); // latest first
 
-          return FutureBuilder<List<Map<String, dynamic>>>(
-            future: _fetchAllGatepasses(students),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const Center(child: Text('No gatepass history available.'));
-              }
-
-              final groupedByDate = _groupByDate(snapshot.data!);
-
-              return ListView(
-                padding: const EdgeInsets.all(12),
-                children: groupedByDate.entries.map((entry) {
-                  final date = entry.key;
-                  final passes = entry.value;
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          return ListView(
+            padding: const EdgeInsets.all(12),
+            children: sortedDates.map((date) {
+              final passes = groupedByDate[date]!;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Date: $date',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Table(
+                    border: TableBorder.all(color: Colors.grey.shade300),
+                    columnWidths: const {
+                      0: FlexColumnWidth(2),
+                      1: FlexColumnWidth(2),
+                      2: FlexColumnWidth(2),
+                      3: FlexColumnWidth(3),
+                      4: FlexColumnWidth(2),
+                      5: FlexColumnWidth(2),
+                    },
                     children: [
-                      Text(
-                        'Date: $date',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      Table(
-                        border: TableBorder.all(color: Colors.grey.shade300),
-                        columnWidths: const {
-                          0: FlexColumnWidth(2),
-                          1: FlexColumnWidth(2),
-                          2: FlexColumnWidth(2),
-                          3: FlexColumnWidth(3),
-                          4: FlexColumnWidth(2),
-                          5: FlexColumnWidth(2),
-                        },
+                      const TableRow(
+                        decoration: BoxDecoration(color: Color(0xFFD6EAF8)),
                         children: [
-                          const TableRow(
-                            decoration: BoxDecoration(color: Color(0xFFD6EAF8)),
-                            children: [
-                              _HeaderCell('Name'),
-                              _HeaderCell('Roll No'),
-                              _HeaderCell('Dept'),
-                              _HeaderCell('Reason'),
-                              _HeaderCell('In-Time'),
-                              _HeaderCell('Out-Time'),
-                            ],
-                          ),
-                          ...passes.map((entry) {
-                            return TableRow(
-                              children: [
-                                _TableCell(entry['name']),
-                                _TableCell(entry['roll']),
-                                _TableCell(entry['department']),
-                                _TableCell(entry['reason']),
-                                _TableCell(entry['inTime']),
-                                _TableCell(entry['outTime']),
-                              ],
-                            );
-                          }),
+                          _HeaderCell('Name'),
+                          _HeaderCell('Roll No'),
+                          _HeaderCell('Dept'),
+                          _HeaderCell('Reason'),
+                          _HeaderCell('In-Time'),
+                          _HeaderCell('Out-Time'),
                         ],
                       ),
-                      const SizedBox(height: 24),
+                      ...passes.map((p) {
+                        return TableRow(
+                          children: [
+                            _TableCell(p['name']),
+                            _TableCell(p['roll']),
+                            _TableCell(p['department']),
+                            _TableCell(p['reason']),
+                            _TableCell(p['inTime']),
+                            _TableCell(p['outTime']),
+                          ],
+                        );
+                      }),
                     ],
-                  );
-                }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+                ],
               );
-            },
+            }).toList(),
           );
         },
       ),
     );
   }
 
-  // Fetch gatepasses of all students
-  Future<List<Map<String, dynamic>>> _fetchAllGatepasses(List<QueryDocumentSnapshot> students) async {
-    List<Map<String, dynamic>> entries = [];
+  /// Fetch gatepasses and group them by date
+  Future<Map<String, List<Map<String, dynamic>>>> _fetchGatepassesGroupedByDate() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('gatepasses')
+        .orderBy('createdAt', descending: true)
+        .get();
 
-    for (final student in students) {
-      final studentData = student.data() as Map<String, dynamic>;
-      final studentId = student.id;
+    Map<String, List<Map<String, dynamic>>> grouped = {};
 
-      final name = studentData['name'] ?? 'Unknown';
-      final roll = studentData['rollNumber'] ?? 'Unknown';
-      final dept = studentData['department'] ?? 'Unknown';
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
 
-      final gatepasses = await FirebaseFirestore.instance
-          .collection('students')
-          .doc(studentId)
-          .collection('gatepasses')
-          .orderBy('timestamp', descending: true)
-          .get();
+      final name = data['studentName'] ?? data['name'] ?? 'Unknown';
+      final roll = data['rollNumber'] ?? data['roll'] ?? 'Unknown';
+      final dept = data['department'] ?? data['dept'] ?? 'Unknown';
+      final reason = data['reason'] ?? data['purpose'] ?? data['visitReason'] ?? 'N/A';
 
-      for (final pass in gatepasses.docs) {
-        final passData = pass.data();
-        final timestamp = (passData['timestamp'] as Timestamp?)?.toDate();
-        final status = passData['status'];
-        final scannedStr = passData['scannedData'] ?? '{}';
-        final parsed = jsonDecode(scannedStr);
+      final inTime = _formatTime(data['inTime']);
+      final outTime = _formatTime(data['outTime']); // Use outTime from Firestore
 
-        if (timestamp == null) continue;
+      final createdAt = _parseDateTime(data['createdAt']);
+      final dateKey = createdAt != null
+          ? DateFormat('yyyy-MM-dd').format(createdAt)
+          : DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-        final dateKey = DateFormat('yyyy-MM-dd').format(timestamp);
-        final reason = parsed['reason'] ?? 'N/A';
-
-        final existingEntry = entries.firstWhere(
-          (e) => e['roll'] == roll && e['date'] == dateKey && e['reason'] == reason,
-          orElse: () => {},
-        );
-
-        if (existingEntry.isEmpty) {
-          entries.add({
-            'name': name,
-            'roll': roll,
-            'department': dept,
-            'date': dateKey,
-            'reason': reason,
-            'inTime': status == 'In' ? DateFormat('hh:mm a').format(timestamp) : '—',
-            'outTime': status == 'Out' ? DateFormat('hh:mm a').format(timestamp) : '—',
-          });
-        } else {
-          if (status == 'In') existingEntry['inTime'] = DateFormat('hh:mm a').format(timestamp);
-          if (status == 'Out') existingEntry['outTime'] = DateFormat('hh:mm a').format(timestamp);
-        }
-      }
+      grouped.putIfAbsent(dateKey, () => []).add({
+        'name': name,
+        'roll': roll,
+        'department': dept,
+        'reason': reason,
+        'inTime': inTime,
+        'outTime': outTime,
+      });
     }
 
-    return entries;
+    return grouped;
   }
 
-  // Group entries by date
-  Map<String, List<Map<String, dynamic>>> _groupByDate(List<Map<String, dynamic>> entries) {
-    final Map<String, List<Map<String, dynamic>>> grouped = {};
-    for (final entry in entries) {
-      final date = entry['date'];
-      grouped.putIfAbsent(date, () => []).add(entry);
+  /// Parse any date format from Firestore
+  DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate().toLocal();
+    if (value is String) {
+      try {
+        return DateTime.parse(value).toLocal();
+      } catch (_) {
+        return null;
+      }
     }
-    return grouped;
+    return null;
+  }
+
+  /// Format time from Timestamp or String
+  String _formatTime(dynamic value) {
+    final dt = _parseDateTime(value);
+    return dt != null ? DateFormat('hh:mm a').format(dt) : '—';
   }
 }
 
-// Helper Widgets
+// Table header cell widget
 class _HeaderCell extends StatelessWidget {
   final String label;
   const _HeaderCell(this.label);
@@ -179,6 +162,7 @@ class _HeaderCell extends StatelessWidget {
   }
 }
 
+// Table data cell widget
 class _TableCell extends StatelessWidget {
   final String text;
   const _TableCell(this.text);
