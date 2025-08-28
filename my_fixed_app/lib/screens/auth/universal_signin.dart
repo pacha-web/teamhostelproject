@@ -97,14 +97,20 @@ class _UniversalSignInState extends State<UniversalSignIn> {
         return;
       }
 
-      final role = (doc.data()!['role'] ?? '').toString();
+      final role = (doc.data()!['role'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase(); // Firestore role
+      final selectedRole = _selectedRole.trim().toLowerCase(); // Dropdown role
 
-      if (role.toLowerCase() != _selectedRole.toLowerCase()) {
+      // ✅ strict match: Firestore role must match dropdown exactly
+      if (role != selectedRole) {
         _handleFailure('Incorrect role selected for this account');
         return;
       }
 
-      switch (role.toLowerCase()) {
+      // ✅ role-based navigation
+      switch (role) {
         case 'admin':
           context.go('/admin');
           break;
@@ -135,13 +141,16 @@ class _UniversalSignInState extends State<UniversalSignIn> {
               studentDoc = byUsername.docs.first;
             } else {
               // As last fallback, try matching authEmail (if you stored it)
-              final authEmail = '${_usernameController.text.trim().toLowerCase()}@$_studentEmailDomain';
+              final authEmail =
+                  '${_usernameController.text.trim().toLowerCase()}@$_studentEmailDomain';
               final byAuthEmail = await FirebaseFirestore.instance
                   .collection('students')
                   .where('authEmail', isEqualTo: authEmail)
                   .limit(1)
                   .get();
-              if (byAuthEmail.docs.isNotEmpty) studentDoc = byAuthEmail.docs.first;
+              if (byAuthEmail.docs.isNotEmpty) {
+                studentDoc = byAuthEmail.docs.first;
+              }
             }
           }
 
@@ -223,14 +232,15 @@ class _UniversalSignInState extends State<UniversalSignIn> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Universal Sign-In', style: TextStyle(color: Colors.white)),
-        backgroundColor: Colors.blue, // <-- changed to match MyGatePass AppBar
+        title: const Text('Universal Sign-In',
+            style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.blue,
         actions: [
           IconButton(
             icon: const Icon(Icons.home),
             tooltip: 'Go to Home',
             onPressed: () {
-              context.go('/'); // Navigate to home/splash screen
+              context.go('/');
             },
           ),
         ],
@@ -259,15 +269,21 @@ class _UniversalSignInState extends State<UniversalSignIn> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _usernameController,
-                keyboardType: isStudent ? TextInputType.text : TextInputType.emailAddress,
+                keyboardType: isStudent
+                    ? TextInputType.text
+                    : TextInputType.emailAddress,
                 decoration: InputDecoration(
                   labelText: isStudent ? 'Roll Number' : 'Email',
                   border: const OutlineInputBorder(),
                   hintText: isStudent ? 'Enter roll number' : 'Enter email',
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) return isStudent ? 'Enter roll number' : 'Enter email';
-                  if (!isStudent && !value.contains('@')) return 'Enter valid email';
+                  if (value == null || value.isEmpty) {
+                    return isStudent ? 'Enter roll number' : 'Enter email';
+                  }
+                  if (!isStudent && !value.contains('@')) {
+                    return 'Enter valid email';
+                  }
                   return null;
                 },
               ),
@@ -280,7 +296,9 @@ class _UniversalSignInState extends State<UniversalSignIn> {
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                      _obscurePassword
+                          ? Icons.visibility
+                          : Icons.visibility_off,
                     ),
                     onPressed: () =>
                         setState(() => _obscurePassword = !_obscurePassword),
@@ -296,7 +314,8 @@ class _UniversalSignInState extends State<UniversalSignIn> {
                     ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
                       )
                     : const Text('Login'),
               ),
