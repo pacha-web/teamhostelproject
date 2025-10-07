@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'screens/admin/view_history_screen.dart';
 
 // Firebase options file (generated using flutterfire configure)
 import 'firebase_options.dart';
@@ -299,7 +300,9 @@ late final GoRouter _router = GoRouter(
     GoRoute(
       path: '/student-list',
       builder: (context, state) => const StudentListPage(),
+
     ),
+    
   ],
 );
 
