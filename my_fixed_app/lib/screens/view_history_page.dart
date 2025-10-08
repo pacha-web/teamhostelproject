@@ -20,8 +20,9 @@ class ViewHistoryScreen extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return const Center(child: Text('Error loading gatepasses.'));
-          }
+  return Center(child: Text('Error: ${snapshot.error}'));
+}
+
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
             return const Center(child: Text('No gatepass history available.'));
           }
@@ -92,7 +93,7 @@ class ViewHistoryScreen extends StatelessWidget {
   /// Fetch gatepasses and group them by date
   Future<Map<String, List<Map<String, dynamic>>>> _fetchGatepassesGroupedByDate() async {
     final snapshot = await FirebaseFirestore.instance
-        .collection('gatepasses')
+        .collection('gatepass_requests')
         .orderBy('createdAt', descending: true)
         .get();
 
