@@ -92,11 +92,10 @@ class ViewHistoryScreen extends StatelessWidget {
 
   /// Fetch gatepasses and group them by date
   Future<Map<String, List<Map<String, dynamic>>>> _fetchGatepassesGroupedByDate() async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('gatepass_requests')
+      final snapshot = await FirebaseFirestore.instance
+        .collection('gatepasses')
         .orderBy('createdAt', descending: true)
         .get();
-
     Map<String, List<Map<String, dynamic>>> grouped = {};
 
     for (final doc in snapshot.docs) {

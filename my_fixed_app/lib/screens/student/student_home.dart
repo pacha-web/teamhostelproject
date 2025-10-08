@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'gatepass_request.dart';
 import 'view_requests.dart';
@@ -29,13 +30,34 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Start with provided extras (may be empty strings)
     _studentName = widget.studentName;
     _profileImageUrl = widget.profileImageUrl;
 
-    // If we already have values, still attempt to refresh in background.
-    // If values are empty, wait and show loader until fetched.
     _loadStudentData(initialLoad: _studentName.isEmpty && _profileImageUrl.isEmpty);
+
+    // Save FCM token
+    _saveFcmToken();
+
+    // Optional: Listen to token refresh
+    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+      _saveFcmToken(token: newToken);
+    });
+  }
+
+  Future<void> _saveFcmToken({String? token}) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final fcmToken = token ?? await FirebaseMessaging.instance.getToken();
+      if (fcmToken == null) return;
+
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'fcmToken': fcmToken,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Failed to save FCM token: $e');
+    }
   }
 
   Future<void> _loadStudentData({bool initialLoad = false}) async {
@@ -46,7 +68,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        // Not signed in — leave defaults and stop loading
         if (mounted) setState(() => _loading = false);
         return;
       }
@@ -55,17 +76,14 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
       DocumentSnapshot<Map<String, dynamic>>? studentDoc;
 
-      // 1) Try by uid
       final byUid = await studentsCol.where('uid', isEqualTo: user.uid).limit(1).get();
       if (byUid.docs.isNotEmpty) {
         studentDoc = byUid.docs.first;
       } else {
-        // 2) Try by username (where username == user's email)
         final byUsername = await studentsCol.where('username', isEqualTo: user.email).limit(1).get();
         if (byUsername.docs.isNotEmpty) {
           studentDoc = byUsername.docs.first;
         } else {
-          // 3) Try by email field
           final byEmail = await studentsCol.where('email', isEqualTo: user.email).limit(1).get();
           if (byEmail.docs.isNotEmpty) studentDoc = byEmail.docs.first;
         }
@@ -84,11 +102,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           });
         }
       } else {
-        // No student doc found — stop loading but keep whatever we had
         if (mounted) setState(() => _loading = false);
       }
     } catch (e) {
-      // On error, just stop loading and keep defaults
       if (mounted) {
         setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load student data: $e')));
@@ -124,7 +140,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // While loading initial data show a simple loader to avoid empty title/avatar flash
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }

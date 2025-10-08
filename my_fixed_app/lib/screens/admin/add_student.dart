@@ -220,10 +220,13 @@ class _AddStudentPageState extends State<AddStudentPage> {
 
       await FirebaseFirestore.instance.collection('students').doc(uid).set(data);
 
-      await FirebaseFirestore.instance.collection('users').doc(rollNumber).set({
-        'role': 'student',
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'role': 'student',
+  'name': name,
+  'rollNumber': rollNumber,
+  'authEmail': authEmail,
+  'createdAt': FieldValue.serverTimestamp(),
+}, SetOptions(merge: true));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

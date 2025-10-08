@@ -1,55 +1,97 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <script type="module">
-  // Import the functions you need from the SDKs you need
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta name="description" content="Hostel Gate Pass">
+  <base href="$FLUTTER_BASE_HREF">
 
-  // Your web app's Firebase configuration
-  const firebaseConfig = {
-    apiKey: "AIzaSyA5IOUxsbYX7TIQ8Idi8ULBjN_zzsoz49E",
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Hostel Gate Pass">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png"/>
+  <title>SXCCE GATE PASS</title>
+  <link rel="manifest" href="manifest.json">
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-messaging.js";
+
+// --- Firebase config ---
+const firebaseConfig = {
+  apiKey: "AIzaSyA5IOUxsbYX7TIQ8Idi8ULBjN_zzsoz49E",
     authDomain: "hostelegatepass.firebaseapp.com",
     projectId: "hostelegatepass",
     storageBucket: "hostelegatepass.firebasestorage.app",
     messagingSenderId: "323050962282",
     appId: "1:323050962282:web:d24917d29fed4a95aab913"
-  };
+};
 
-  // Initialize Firebase
-  const app = initializeApp(firebaseConfig);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const messaging = getMessaging(app);
+
+// --- Setup FCM for logged-in user ---
+async function setupFCM(userUid) {
+  try {
+    const registration = await navigator.serviceWorker.register('firebase-messaging-sw.js');
+    console.log('Service Worker registered:', registration.scope);
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      console.log('Notification permission denied');
+      return;
+    }
+
+    const currentToken = await getToken(messaging, {
+      vapidKey: 'BLwA10eUDqSSw72N0Ea4cBSH1VJw1fzw1WD-QILn1pyrCWbdveVT9WOCotVgu4pk3rl0cQBiDPyVEiKD65t_zTc',
+      serviceWorkerRegistration: registration
+    });
+
+    if (currentToken) {
+      console.log('FCM Token:', currentToken);
+
+      // Save FCM token in Firestore for this user
+      await setDoc(doc(db, 'users', userUid), { fcmToken: currentToken }, { merge: true });
+      console.log('FCM token saved to Firestore');
+    }
+  } catch (err) {
+    console.error('FCM setup error:', err);
+  }
+}
+
+// --- Foreground notifications ---
+onMessage(messaging, payload => {
+  console.log('Foreground message received:', payload);
+
+  if (payload.notification) {
+    const notification = new Notification(payload.notification.title, {
+      body: payload.notification.body,
+      icon: '/icons/favicon.png',
+      vibrate: [200, 100, 200]
+    });
+
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+    };
+  }
+});
+
+// --- Trigger FCM setup when user is logged in ---
+onAuthStateChanged(auth, user => {
+  if (user) {
+    setupFCM(user.uid);
+  }
+});
 </script>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
 
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
 
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
 
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
-  <base href="$FLUTTER_BASE_HREF">
-
-  <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-
-  <!-- iOS meta tags & icons -->
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="my_fixed_app">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>SXCCE GATE PASS</title>
-  <link rel="manifest" href="manifest.json">
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
